@@ -1,5 +1,5 @@
-;;; Copyright (C) 2010-2013 Rocky Bernstein <rocky@gnu.org>
-;;  tracks shell output
+;;; Copyright (C) 2010-2015 Rocky Bernstein <rocky@gnu.org>
+;;; tracks shell output
 
 (eval-when-compile (require 'cl))
 (require 'shell)
@@ -12,8 +12,21 @@
 
 (require-relative-list  '("buffer/command") "realgud-buffer-")
 
+;; FIXME figure out if I can put this in something like a header file.
+(declare-function realgud-fringe-erase-history-arrows 'realgud-buffer-command)
+(declare-function realgud:track-set-debugger          'realgud-track)
+(declare-function realgud-populate-debugger-menu      'realgud-menu)
+(declare-function realgud-cmdbuf-info-divert-output?=
+		  'realgud-buffer-command)
+(declare-function realgud-cmdbuf-info-prior-prompt-regexp=
+		  'realgud-buffer-command)
+(declare-function realgud-cmdbuf-info-set?
+		  'realgud-buffer-command)
+
+
 (defvar realgud-track-mode-map
-  (let ((map  (realgud-populate-debugger-menu (make-sparse-keymap))))
+  (let ((map  (copy-keymap shell-mode-map)))
+    (realgud-populate-debugger-menu map)
     (define-key map [M-right]	'realgud-track-hist-newest)
     (define-key map [M-down]	'realgud-track-hist-newer)
     (define-key map [M-up]	'realgud-track-hist-older)
@@ -24,11 +37,32 @@
     map)
   "Keymap used in `realgud-track-minor-mode'.")
 
-(set-keymap-parent realgud-track-mode-map shell-mode-map)
-
-
-;; FIXME figure out if I can put this in something like a header file.
-(declare-function realgud-track-set-debugger (debugger-name &optional hash))
+(defvar realgud:tool-bar-map
+  (let ((map (make-sparse-keymap)))
+    (dolist (x '((realgud:cmd-break . "gud/break")
+		 ;; (realgud:cmd-remove . "gud/remove")
+		 ;; (realgud:cmd-print . "gud/print")
+		 ;; (realgud:cmd-pstar . "gud/pstar")
+		 ;; (realgud:cmd-pp . "gud/pp")
+		 ;; (realgud:cmd-watch . "gud/watch")
+		 (realgud:cmd-restart . "gud/run")
+		 ;; (realgud:cmd-go . "gud/go")
+		 ;; (realgud:cmd-stop-subjob . "gud/stop")
+		 (realgud:cmd-continue . "gud/cont")
+		 (realgud:cmd-until . "gud/until")
+		 (realgud:cmd-next . "gud/next")
+		 (realgud:cmd-step . "gud/step")
+		 (realgud:cmd-finish . "gud/finish")
+		 ;; (realgud:cmd-nexti . "gud/nexti")
+		 ;; (realgud:cmd-stepi . "gud/stepi")
+		 (realgud:cmd-older-frame . "gud/up")
+		 (realgud:cmd-newer-frame . "gud/down")
+		 (realgud:cmdbuf-info-describe . "info"))
+	       map)
+      (tool-bar-local-item-from-menu
+       (car x) (cdr x) map realgud-track-mode-map)))
+  "toolbar use when `realgud' interface is active"
+  )
 
 (define-minor-mode realgud-track-mode
   "Minor mode for tracking debugging inside a process shell."
@@ -69,7 +103,7 @@ of this mode."
 	(set-process-sentinel process 'realgud-term-sentinel)
 	(unless (and (realgud-cmdbuf-info-set?)
 		     (realgud-sget 'cmdbuf-info 'debugger-name))
-	  (call-interactively 'realgud-track-set-debugger))
+	  (call-interactively 'realgud:track-set-debugger))
 	(if (boundp 'comint-last-output-start)
 	    (progn
 	      (realgud-cmdbuf-info-prior-prompt-regexp= comint-prompt-regexp)
@@ -84,16 +118,19 @@ of this mode."
 			    (realgud-loc-pat-regexp prompt-pat)))))
 	  (set-marker comint-last-output-start (point)))
 
+	(set (make-local-variable 'tool-bar-map) realgud:tool-bar-map)
 	(add-hook 'comint-output-filter-functions
 		  'realgud-track-comint-output-filter-hook)
 	(add-hook 'eshell-output-filter-functions
 		  'realgud-track-eshell-output-filter-hook)
 	(run-mode-hooks 'realgud-track-mode-hook))
+  ;; else
     (progn
       (if (and (boundp 'comint-last-output-start) realgud-cmdbuf-info)
 	(setq comint-prompt-regexp
 	   (realgud-sget 'cmdbuf-info 'prior-prompt-regexp))
 	)
+      (kill-local-variable 'realgud:tool-bar-map)
       (realgud-fringe-erase-history-arrows)
       (remove-hook 'comint-output-filter-functions
       		   'realgud-track-comint-output-filter-hook)
@@ -111,7 +148,7 @@ of this mode."
 	(force-mode-line-update)
 	;; FIXME: This is a workaround. Without this, we comint doesn't
 	;; process commands
-	(comint-mode)
+	(unless (member 'comint-mode minor-mode-list) (comint-mode))
 	)
 
       ;; FIXME: restore/unchain old process sentinels.
@@ -123,7 +160,6 @@ of this mode."
 ;;   (defvar trepan-track-mode nil
 ;;     "Non-nil if using trepan track-mode ... "
 ;;   (defvar trepan-track-mode-map (make-sparse-keymap))
-;;   (set-keymap-parent trepan-track-mode-map realgud-track-mode-map)
 ;;   (defvar trepan-short-key-mode-map (make-sparse-keymap))
 ;;   (set-keymap-parent trepan-short-key-mode-map realgud-short-key-mode-map)
 (defmacro realgud-track-mode-vars (name)
@@ -133,9 +169,7 @@ of this mode."
 Use the command `%s-track-mode' to toggle or set this variable." name name))
      (defvar ,(intern (concat name "-track-mode-map")) (make-sparse-keymap)
        ,(format "Keymap used in `%s-track-mode'." name))
-     (set-keymap-parent ,(intern (concat name "-track-mode-map")) realgud-track-mode-map)
      (defvar ,(intern (concat name "-short-key-mode-map")) (make-sparse-keymap))
-     (set-keymap-parent ,(intern (concat name "-short-key-mode-map")) realgud-short-key-mode-map)
     ))
 
 ;; FIXME: The below could be a macro? I have a hard time getting
@@ -143,7 +177,7 @@ Use the command `%s-track-mode' to toggle or set this variable." name name))
 (defun realgud-track-mode-body(name)
   "Used in by custom debuggers: pydbgr, trepan, gdb, etc. NAME is
 the name of the debugger which is used to preface variables."
-  (realgud-track-set-debugger name)
+  (realgud:track-set-debugger name)
   (funcall (intern (concat "realgud-define-" name "-commands")))
   (if (intern (concat name "-track-mode"))
       (progn
@@ -153,14 +187,14 @@ the name of the debugger which is used to preface variables."
       (setq realgud-track-mode nil)
       )))
 
-(defun realgud-track-mode-disable()
+(defun realgud:track-mode-disable()
   "Disable the debugger track-mode hook"
   (interactive "")
   (if realgud-track-mode
       (setq realgud-track-mode nil)
     (message "Debugger is not in track mode")))
 
-(defun realgud-track-mode-enable()
+(defun realgud:track-mode-enable()
   "Enable the debugger track-mode hook"
   (interactive "")
   (if realgud-track-mode

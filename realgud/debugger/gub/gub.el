@@ -1,32 +1,30 @@
-;;; Copyright (C) 2013 Rocky Bernstein <rocky@gnu.org>
+;;; Copyright (C) 2013-2015 Rocky Bernstein <rocky@gnu.org>
 ;;  `gub' Main interface to Go gub via Emacs
 (require 'load-relative)
 (require-relative-list '("../../common/helper") "realgud-")
 (require-relative-list '("../../common/track") "realgud-")
-(require-relative-list '("core" "track-mode") "realgud-gub-")
+(require-relative-list '("core" "track-mode") "realgud:gub-")
 ;; This is needed, or at least the docstring part of it is needed to
-;; get the customization menu to work in Emacs 23.
-(defgroup gub nil
-  "The Go SSA interpreter debugger: gub"
-  :group 'processes
-  :group 'dbgr
-  :group 'make
-  :version "23.1")
+;; get the customization menu to work in Emacs 24.
+(defgroup realgud:gub nil
+  "The realgud interface to the Go SSA interpreter debugger, gub"
+  :group 'realgud
+  :version "23.4")
 
 ;; -------------------------------------------------------------------
 ;; User definable variables
 ;;
 
-(defcustom gub-command-name
+(defcustom realgud:gub-command-name
   "tortoise -run -gub= -interp=SS --"
   "File name for executing the Go SSA interpreter/debugger, gub, and command options.
 This should be an executable on your path, or an absolute file name."
   :type 'string
-  :group 'gub)
+  :group 'realgud:gub)
 
 (declare-function gub-query-cmdline  'realgud-gub-core)
 (declare-function gub-parse-cmd-args 'realgud-gub-core)
-(declare-function realgud-run-process 'realgud-core)
+(declare-function realgud:run-process 'realgud-core)
 
 
 (defun realgud-gub-fn (&optional opt-command-line no-reset)
@@ -40,7 +38,7 @@ This should be an executable on your path, or an absolute file name."
 	 (go-prog-and-args (caddr parsed-args))
 	 (script-filename (car go-prog-and-args))
 	 (cmd-buf))
-    (realgud-run-process gub-program script-filename cmd-args
+    (realgud:run-process gub-program script-filename cmd-args
 			 'gub-track-mode no-reset)
     )
   )

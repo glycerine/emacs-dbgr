@@ -1,18 +1,18 @@
-;;; Copyright (C) 2013 Rocky Bernstein <rocky@gnu.org>
+;;; Copyright (C) 2013-2014 Rocky Bernstein <rocky@gnu.org>
 (eval-when-compile (require 'cl))
 
 (require 'load-relative)
 (require-relative-list '("../../common/track" "../../common/lang"
 			 "../../common/core") "realgud-")
-(require-relative-list '("init") "realgud-gub-")
+(require-relative-list '("init") "realgud:gub-")
 
-(declare-function realgud-query-cmdline 'realgud-core)
+(declare-function realgud-query-cmdline      'realgud-core)
 (declare-function realgud-suggest-invocation 'realgud-core)
-(declare-function realgud-lang-mode? 'realgud-lang)
+(declare-function realgud-lang-mode?         'realgud-lang)
 
 ;; FIXME: I think the following could be generalized and moved to
 ;; realgud-... probably via a macro.
-(defvar gub-minibuffer-history nil
+(defvar realgud:gub-minibuffer-history nil
   "minibuffer history list for the command `gub'.")
 
 (easy-mmode-defmap gub-minibuffer-local-map
@@ -26,7 +26,7 @@
   (realgud-query-cmdline
    'gub-suggest-invocation
    gub-minibuffer-local-map
-   'gub-minibuffer-history
+   'realgud:gub-minibuffer-history
    opt-debugger))
 
 (defun gub-parse-cmd-args (orig-args)
@@ -87,7 +87,7 @@ NOTE: the above should have each item listed in quotes.
       (list gub-name gub-args go-prog-and-args)
     ))
 
-(defconst realgud-gub-auto-suffix-regexp
+(defconst realgud:gub-auto-suffix-regexp
   "\\.go$"
   "Go file suffix"
 )
@@ -98,7 +98,7 @@ NOTE: the above should have each item listed in quotes.
 	)
     (if (realgud-lang-mode? filename "go")
 	(progn
-	  (if (string-match realgud-gub-auto-suffix-regexp filename)
+	  (if (string-match realgud:gub-auto-suffix-regexp filename)
 	      (setq priority 5)
 	    (setq priority 7))
 	  ))
@@ -106,18 +106,20 @@ NOTE: the above should have each item listed in quotes.
     )
 )
 
-(defvar gub-command-name) ; # To silence Warning: reference to free variable
+;; To silence Warning: reference to free variable
+(defvar realgud:gub-command-name)
 
 (defun gub-suggest-invocation (debugger-name)
   "Suggest a command invocation via `realgud-suggest-invocaton'"
-  (realgud-suggest-invocation gub-command-name gub-minibuffer-history
-                           "go" "\\.go$" "gub.sh"))
+  (realgud-suggest-invocation realgud:gub-command-name
+			      realgud:gub-minibuffer-history
+			      "go" "\\.go$"))
 
 ;; Convert a command line as would be typed normally to run a script
 ;; into one that invokes an Emacs-enabled debugging session.
 ;; "--debugger" in inserted as the first switch.
 
-(defun realgud-gub-massage-args (command-line)
+(defun realgud:gub-massage-args (command-line)
   (let* ((new-args (list "--debugger"))
 	 (args (split-string-and-unquote command-line))
 	 (program (car args))
@@ -165,9 +167,9 @@ breakpoints, etc.)."
 ;; 	  gub-debugger-support-minor-mode-map-when-deactive))
 
 
-(defun gub-customize ()
+(defun realgud:gub-customize ()
   "Use `customize' to edit the settings of the `gub' debugger."
   (interactive)
-  (customize-group 'gub))
+  (customize-group 'realgud:gub))
 
-(provide-me "realgud-gub-")
+(provide-me "realgud:gub-")

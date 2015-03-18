@@ -1,7 +1,13 @@
-;;; Copyright (C) 2010 Rocky Bernstein <rocky@gnu.org>
+;;; Copyright (C) 2010, 2014-2015 Rocky Bernstein <rocky@gnu.org>
 (require 'load-relative)
 (require-relative-list '("helper") "realgud-")
 (require-relative-list '("buffer/helper") "realgud-buffer-")
+
+(declare-function realgud:backtrace-init    'realgud-buffer-helper)
+(declare-function realgud-get-backtrace-buf 'realgud-buffer-helper)
+(declare-function realgud-get-cmdbuf        'realgud-buffer-helper)
+(declare-function realgud-get-srcbuf        'realgud-buffer-helper)
+(declare-function buffer-killed?            'realgud-helper)
 
 (declare-function one-window-p(bool))
 
@@ -9,18 +15,10 @@
   "Update BUFFER to position specified with MARKER.
 We assume MARKER points inside BUFFER"
   (with-current-buffer buffer
+    (goto-char marker)
     (let ((window (get-buffer-window buffer)))
-      (if window
-	  (progn
-	    (select-window window)
-	    (if marker
-		(progn
-		  (goto-char marker)
-		  (redisplay)
-		  ))
-	    )
-	)))
-  )
+      (if window (set-window-point window marker))
+      )))
 
 
 (defun realgud-window-src ( &optional opt-buffer )
@@ -78,28 +76,27 @@ See also `realgud-window-src'"
 	 (cmd-window (get-buffer-window cmd-buffer))
 	 (window (selected-window))
 	 )
-    (if cmd-buffer
-	(progn
-	  (unless cmd-window
-	    (setq cmd-window
-		  (if (eq window src-window)
-		      ;; FIXME: generalize what to do here.
-		      (if (one-window-p 't)
-			  (split-window)
-			(next-window window 'no-minibuf))
-		    window))
-	    (set-window-buffer cmd-window cmd-buffer)
-	    )
-	  (if switch?
-	      (and (select-window cmd-window)
-		   (switch-to-buffer cmd-buffer))))
+    (when cmd-buffer
+      (unless cmd-window
+	(setq cmd-window
+	      (if (eq window src-window)
+		  ;; FIXME: generalize what to do here.
+		  (if (one-window-p 't)
+		      (split-window)
+		    (next-window window 'no-minibuf))
+		window))
+	(set-window-buffer cmd-window cmd-buffer)
+	)
+      (if switch?
+	  (and (select-window cmd-window)
+	       (switch-to-buffer cmd-buffer)))
 
       )
     (select-window cmd-window)
     src-window)
   )
 
-(defun realgud-window-bt-undisturb-src ( &optional opt-buffer switch?)
+(defun realgud:window-bt-undisturb-src ( &optional opt-buffer switch?)
   "Make sure the backtrace buffer is displayed in windows without
 disturbing the source window if it is also displayed. Returns
 the source window
@@ -114,32 +111,31 @@ See also `realgud-window-src'"
 	 (bt-window (get-buffer-window bt-buffer))
 	 (window (selected-window))
 	 )
-    (if cmd-buffer
-	(progn
-	  (unless bt-window
-	    (setq bt-window
-		  (if (eq window src-window)
-		      ;; FIXME: generalize what to do here.
-		      (if (one-window-p 't)
-			  (split-window)
-			(next-window window 'no-minibuf))
-		    window))
-	    (set-window-buffer bt-window bt-buffer)
-	    )
-	  (if switch?
-	      (and (select-window bt-window)
-		   (switch-to-buffer bt-buffer))))
+    (when cmd-buffer
+      (unless bt-window
+	(setq bt-window
+	      (if (eq window src-window)
+		  ;; FIXME: generalize what to do here.
+		  (if (one-window-p 't)
+		      (split-window)
+		    (next-window window 'no-minibuf))
+		window))
+	(set-window-buffer bt-window bt-buffer)
+	)
+      (if switch?
+	  (and (select-window bt-window)
+	       (switch-to-buffer bt-buffer)))
 
       )
     src-window)
   )
 
-(defun realgud-window-bt()
+(defun realgud:window-bt()
   "Refresh backtrace information and display that in a buffer"
   (interactive)
   (with-current-buffer-safe (realgud-get-cmdbuf)
-    (realgud-backtrace-init)
-    (realgud-window-bt-undisturb-src)
+    (realgud:backtrace-init)
+    (realgud:window-bt-undisturb-src)
     )
   )
 

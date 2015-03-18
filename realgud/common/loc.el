@@ -1,4 +1,4 @@
-;;; Copyright (C) 2010, 2012 Rocky Bernstein <rocky@gnu.org>
+;;; Copyright (C) 2010, 2012, 2014-2015 Rocky Bernstein <rocky@gnu.org>
 ;;; Debugger location
 ;;; Commentary:
 
@@ -7,7 +7,15 @@
 
 (require 'load-relative)
 (require 'loc-changes)
-(require-relative-list '("fringe") "realgud-")
+(require-relative-list '("fringe" "follow") "realgud-")
+(require-relative-list '("buffer/source") "realgud-buffer-")
+
+;; FIXME: removed because of recursive loads
+;; (require-relative-list '("buffer/helper") "realgud-buffer-")
+
+(declare-function realgud:strip                  'realgud)
+(declare-function realgud-get-cmdbuf-from-srcbuf 'realgud-buffer-helper)
+(declare-function realgud-srcbuf?                'realgud-buffer-source)
 
 (defstruct realgud-loc
 "Our own location type. Even though a mark contains a
@@ -19,56 +27,108 @@ want to save the values that were seen/requested originally."
    filename
    line-number
    column-number ;; Column offset within line
+   source-text   ;; Source text if available
    marker        ;; Position in source code
    cmd-marker    ;; Position in command process buffer
 )
 
 (defalias 'realgud-loc? 'realgud-loc-p)
 
-(defun realgud-loc-describe (loc)
+;; The below function is generic and might be found in standard
+;; library. Or it might be moved someplace more generic.
+(defun realgud:buffer-line-no-props()
+  "Returns a string containing the line that `point' is at,
+without buffer properties."
+  (buffer-substring-no-properties (point-at-bol)
+				  (point-at-eol)))
+
+(defun realgud:loc-describe (loc)
   "Display realgud-cmdcbuf-info.
 Information is put in an internal buffer called *Describe*."
   (interactive "")
   (switch-to-buffer (get-buffer-create "*Describe*"))
-  (mapc 'insert
-	(list
-	 (format "    num          : %s\n" (realgud-loc-num loc))
-	 (format "    filename     : %s\n" (realgud-loc-filename loc))
-	 (format "    line number  : %s\n" (realgud-loc-line-number loc))
-	 (format "    column number: %s\n" (realgud-loc-column-number loc))
-	 (format "    source marker: %s\n" (realgud-loc-marker loc))
-	 (format "    cmdbuf marker: %s\n" (realgud-loc-cmd-marker loc))
-	 ))
+  (let ((link-start) (link-end) (map) (filename))
+    (insert "  - filename      :: ")
+    (setq filename (realgud-loc-filename loc))
+    (put-text-property
+     (insert-text-button filename
+			 'action 'realgud:follow-event
+			 'help-echo "mouse-2: go to this file")
+     (point)
+     'file filename)
+    (insert "\n")
+    (mapc 'insert
+	  (list
+	   (format "  - line number   :: %s\n" (realgud-loc-line-number loc))
+	   (format "  - brkpt num     :: %s\n" (realgud-loc-num loc))
+	   (format "  - column number :: %s\n"
+		   (realgud-loc-column-number loc))
+	   (format "  - source text   :: %s\n" (realgud-loc-source-text loc))
+	   ))
+    ;; Make locations clickable
+    (insert "  - source marker :: ")
+    (put-text-property
+     (insert-text-button (format "%s" (realgud-loc-marker loc))
+			 'action 'realgud:follow-event
+			 'help-echo "mouse-2: go to this source location")
+     (point)
+     'mark (realgud-loc-marker loc))
+
+    (insert "\n  - cmdbuf marker :: ")
+    (put-text-property
+     (insert-text-button (format "%s" (realgud-loc-cmd-marker loc))
+			 'action 'realgud:follow-event
+			 'help-echo "mouse-2: go to this command-buffer location")
+     (point)
+     'mark (realgud-loc-cmd-marker loc))
+    (insert "\n")
+    )
   )
 
-(defun realgud-loc-current(source-buffer cmd-marker)
-  "Create a location object for the point in the current buffer."
+
+(defun realgud-loc-current(&optional source-buffer cmd-marker)
+  "Create a location object for the point in the current buffer.
+   If SOURCE-BUFFER is not given, take the current buffer as the
+   source buffer."
+  (interactive "")
+  (unless source-buffer
+    (setq source-buffer (current-buffer)))
+  (unless (realgud-srcbuf? source-buffer)
+    (error "%s is not a realgud source buffer" source-buffer))
+  (unless cmd-marker
+    (setq cmd-marker
+	  (realgud-get-cmdbuf-from-srcbuf source-buffer))
+    )
   (with-current-buffer source-buffer
-    (make-realgud-loc
-     :filename (buffer-file-name source-buffer)
-     :column-number (current-column)
-     :line-number (line-number-at-pos)
-     :marker (point-marker)
-     :cmd-marker cmd-marker
-    )))
+    (let ((mark (point-marker))
+	  (text (realgud:buffer-line-no-props)))
+      (make-realgud-loc
+       :filename (buffer-file-name source-buffer)
+       :column-number (current-column)
+       :line-number (line-number-at-pos)
+       :source-text text
+       :marker      mark
+       :cmd-marker cmd-marker
+       )
+      )))
 
 (defun realgud-loc-marker=(loc marker)
   (setf (realgud-loc-marker loc) marker))
 
 (defun realgud-loc-goto(loc)
   "Position point in the buffer referred to by LOC. This may
-involve reading in a file.In the process, the marker inside loc
+involve reading in a file. In the process, the marker inside LOC
 may be updated.
 
-The buffer containing the location referred to, the source-code
-buffer, is returned if LOC is found. nil is returned if LOC is
-not not found"
+If LOC is found, The buffer containing the location referred to,
+the source-code buffer, is returned. Otherwise, nil is returned."
   (if (realgud-loc? loc)
       (let* ((filename    (realgud-loc-filename loc))
 	     (line-number (realgud-loc-line-number loc))
 	     (column-number (realgud-loc-column-number loc))
 	     (marker      (realgud-loc-marker loc))
 	     (cmd-marker  (realgud-loc-cmd-marker loc))
+	     (use-marker  nil)
 	     (src-buffer  (marker-buffer (or marker (make-marker)))))
 	(if (and (not src-buffer) filename)
 	    (setq src-buffer (find-file-noselect filename)))
@@ -77,9 +137,23 @@ not not found"
 	      (goto-char cmd-marker)))
 	(if src-buffer
 	    (with-current-buffer src-buffer
-	      (if (and marker (marker-position marker))
-		  ;; A marker has been set in loc, so use that.
+	      (when (and marker (marker-position marker))
+		;; A marker has been set in loc, so use that.
+		(goto-char (marker-position marker))
+		(setq use-marker 't)
+		(let ((current-text (realgud:buffer-line-no-props))
+		      (loc-text (realgud-loc-source-text loc)))
+		  (unless (and loc-text
+			       (equal (realgud:strip current-text) (realgud:strip loc-text)))
+		    (loc-changes-goto line-number)
+		    (setq current-text (realgud:buffer-line-no-props))
+		    (when (equal current-text loc-text)
+		      (message "Marked location needed updating")
+		      (setq use-marker nil))
+		    )))
+	      (if use-marker
 		  (goto-char (marker-position marker))
+		;; else
 		;; We don't have a position set in the source buffer
 		;; so find it and go there. We use `loc-changes-goto'
 		;; to find that spot. `loc-changes-goto' keeps a
@@ -88,6 +162,8 @@ not not found"
 		;; reliable.
 		(let ((src-marker))
 		  (loc-changes-goto line-number)
+		  (when column-number
+		    (move-to-column column-number))
 		  (setq src-marker (point-marker))
 		  (realgud-loc-marker= loc src-marker)
 		  ))))

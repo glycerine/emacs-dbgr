@@ -1,9 +1,13 @@
 ;;; process-command buffer things
-;;; Copyright (C) 2010, 2011, 2012 Rocky Bernstein <rocky@gnu.org>
+;;; Copyright (C) 2010-2012, 2014-2015 Rocky Bernstein <rocky@gnu.org>
 
 (require 'load-relative)
+(require 'json)
 (require-relative-list
- '("../fringe" "../helper" "../loc" "../lochist" "../regexp") "realgud-")
+ '("../fringe"  "../loc" "../lochist" "../regexp")  "realgud-")
+(require-relative-list '("info")  "realgud-buffer-")
+
+(declare-function realgud-get-cmdbuf 'realgud-buffer-helper)
 
 (eval-when-compile
   (byte-compile-disable-warning 'cl-functions)
@@ -26,13 +30,13 @@
     (t (:weight bold)))
   "Face used to highlight debugger run information."
   :group 'realgud
-  :version "23.1")
+  :version "24.3")
 
 (defface debugger-not-running
   '((t :inherit font-lock-warning-face))
   "Face used when debugger or process is not running."
   :group 'realgud
-  :version "23.1")
+  :version "24.3")
 
 
 (defstruct realgud-cmdbuf-info
@@ -43,6 +47,8 @@
 		       ;; command buffer?
   in-srcbuf?           ;; If true, selected window should be the source buffer.
 		       ;; Otherwise, the command buffer?
+  last-input-end       ;; point where input last ended. Set from
+                       ;; comint-last-input-end
   prior-prompt-regexp  ;; regular expression prompt (e.g.
                        ;; comint-prompt-regexp) *before* setting
                        ;; loc-regexp
@@ -59,11 +65,20 @@
                        ;; debugger.
   cmd-hash             ;; Allows us to remap command names like
                        ;; quit => quit!
+  callback-loc-fn      ;; If we need, as in the case of Java, to do
+                       ;; special handling to map output to a file
+                       ;; location, this is set to that special
+                       ;; function
+  callback-eval-filter ;; If set, this function strip extraneous output
+                       ;; when evaluating an expression. For example,
+                       ;; some trepan debuggers expression values prefaced with:
+                       ;; $DB::D[0] =
 
   ;; FIXME: REMOVE THIS and use regexp-hash
   loc-regexp   ;; Location regular expression string
   file-group
   line-group
+  text-group
   ignore-file-re
 
   loc-hist     ;; ring of locations seen in the course of execution
@@ -78,6 +93,7 @@
 (realgud-struct-field-setter "realgud-cmdbuf-info" "bp-list")
 (realgud-struct-field-setter "realgud-cmdbuf-info" "bt-buf")
 (realgud-struct-field-setter "realgud-cmdbuf-info" "cmd-args")
+(realgud-struct-field-setter "realgud-cmdbuf-info" "last-input-end")
 (realgud-struct-field-setter "realgud-cmdbuf-info" "divert-output?")
 (realgud-struct-field-setter "realgud-cmdbuf-info" "frame-switch?")
 (realgud-struct-field-setter "realgud-cmdbuf-info" "in-srcbuf?")
@@ -85,8 +101,30 @@
 (realgud-struct-field-setter "realgud-cmdbuf-info" "prior-prompt-regexp")
 (realgud-struct-field-setter "realgud-cmdbuf-info" "src-shortkey?")
 (realgud-struct-field-setter "realgud-cmdbuf-info" "in-debugger?")
+(realgud-struct-field-setter "realgud-cmdbuf-info" "callback-loc-fn")
+(realgud-struct-field-setter "realgud-cmdbuf-info" "callback-eval-filter")
 
-(defun realgud-cmdbuf-info-describe (&optional buffer)
+(defun realgud:cmdbuf-follow-buffer(event)
+  (interactive "e")
+  (let* ((pos (posn-point (event-end event)))
+	 (buffer (get-text-property pos 'buffer)))
+    (find-file-other-window (buffer-file-name buffer))))
+
+(defun realgud:cmdbuf-buffers-describe (buffer-list)
+  (insert "** Source Buffers Seen\n")
+  (dolist (buffer buffer-list)
+    (insert "  - ")
+    (put-text-property
+     (insert-text-button
+      (buffer-name buffer)
+      'action 'realgud:cmdbuf-follow-buffer
+      'help-echo "mouse-2: visit this file")
+     (point)
+     'buffer buffer)
+    (insert "\n")
+    ))
+
+(defun realgud:cmdbuf-info-describe (&optional buffer)
   "Display realgud-cmdcbuf-info fields of BUFFER.
 BUFFER is either a debugger command or source buffer. If BUFFER is not given
 the current buffer is used as a starting point.
@@ -98,30 +136,39 @@ Information is put in an internal buffer called *Describe*."
 	(let ((info realgud-cmdbuf-info)
 	      (cmdbuf-name (buffer-name)))
 	  (switch-to-buffer (get-buffer-create "*Describe*"))
+	  (setq buffer-read-only 'nil)
 	  (delete-region (point-min) (point-max))
+	  (insert "#+STARTUP: showall\n")
+	  ;;(insert "#+OPTIONS:    H:2 num:nil toc:t \\n:nil ::t |:t ^:nil -:t f:t *:t tex:t d:(HIDE) tags:not-in-toc\n")
+	  (insert (format "#+TITLE: Debugger info for %s\n" cmdbuf-name))
+	  (insert "** General Information\n")
 	  (mapc 'insert
 		(list
-		 (format "realgud-cmdbuf-info for %s\n\n" cmdbuf-name)
-		 (format "Debugger name (debugger-name): %s\n"
-			 (realgud-cmdbuf-info-debugger-name info))
-		 (format "Command-line args (cmd-args): %s\n"
-			 (realgud-cmdbuf-info-cmd-args info))
-		 (format "Selected window should contain source? (in-srcbuf?): %s\n"
+		 (format "  - Debugger name     ::\t%s\n"
+			 (json-encode (realgud-cmdbuf-info-debugger-name info)))
+		 (format "  - Command-line args ::\t%s\n"
+			 (json-encode (realgud-cmdbuf-info-cmd-args info)))
+		 (format "  - Selected window should contain source? :: %s\n"
 			 (realgud-cmdbuf-info-in-srcbuf? info))
-		 (format "Source should go into short-key mode? (src-shortkey?): %s\n"
+		 (format "  - Last input end    ::\t%s\n"
+			 (realgud-cmdbuf-info-last-input-end info))
+		 (format "  - Source should go into short-key mode? :: %s\n"
 			 (realgud-cmdbuf-info-src-shortkey? info))
-		 (format "Breakpoint list (bp-list): %s\n"
+		 (format "  - Breakpoint list   ::\t %s\n"
 			 (realgud-cmdbuf-info-bp-list info))
-		 (format "Remap table for debugger commands: %s\n"
-			 (realgud-cmdbuf-info-cmd-hash info))
-		 (format "Source buffers seen (srcbuf-list): %s\n"
-			 (realgud-cmdbuf-info-srcbuf-list info))
-		 (format "Backtrace buffer (bt): %s\n"
+		 (format "  - Remap table for debugger commands ::\n\t%s\n"
+			 (json-encode (realgud-cmdbuf-info-cmd-hash info)))
+		 (format "  - Backtrace buffer  ::\t%s\n"
 			 (realgud-cmdbuf-info-bt-buf info))
-		 (format "In debugger? (in-debugger?): %s\n"
+		 (format "  - In debugger?      ::\t%s\n"
 			 (realgud-cmdbuf-info-in-debugger? info))
 		 ))
-	  (realgud-loc-hist-describe (realgud-cmdbuf-info-loc-hist info))
+	  (insert "\n")
+	  (realgud:cmdbuf-buffers-describe (realgud-cmdbuf-info-srcbuf-list info))
+	  (insert "\n")
+	  (realgud:loc-hist-describe (realgud-cmdbuf-info-loc-hist info))
+	  (goto-char (point-min))
+	  (realgud:info-mode)
 	  )
 	)
     (message "Buffer %s is not a debugger source or command buffer; nothing done."
@@ -210,20 +257,20 @@ Information is put in an internal buffer called *Describe*."
 		       cmd-args)))))
      (t nil)))
 
-;; FIXME pat-hash should not be optional. And while I am at it, remove
+;; FIXME cmd-hash should not be optional. And while I am at it, remove
 ;; parameters loc-regexp, file-group, and line-group which can be found
 ;; inside pat-hash
 ;;
 ;; To do this however we need to fix up the caller
-;; realgud-track-set-debugger by changing realgud-pat-hash to store a hash
+;; realgud:track-set-debugger by changing realgud-pat-hash to store a hash
 ;; rather than the loc, file, and line fields; those fields then get
 ;; removed.
 
 (defun realgud-cmdbuf-init
   (cmd-buf debugger-name regexp-hash &optional cmd-hash)
   "Initialize CMD-BUF for a working with a debugger.
-DEBUGGER-NAME is the name of the debugger.
-as a main program."
+DEBUGGER-NAME is the name of the debugger; REGEXP-HASH are debugger-specific
+values set in the debugger's init.el."
   (with-current-buffer-safe cmd-buf
     (let ((realgud-loc-pat (gethash "loc" regexp-hash))
 	  (font-lock-keywords)
@@ -235,13 +282,18 @@ as a main program."
 	     :loc-regexp (realgud-sget 'loc-pat 'regexp)
 	     :file-group (realgud-sget 'loc-pat 'file-group)
 	     :line-group (realgud-sget 'loc-pat 'line-group)
+	     :text-group (realgud-sget 'loc-pat 'text-group)
 	     :ignore-file-re (realgud-sget 'loc-pat 'ignore-file-re)
 	     :loc-hist (make-realgud-loc-hist)
 	     :regexp-hash regexp-hash
 	     :bt-buf nil
+	     :last-input-end (point-max)
 	     :cmd-hash cmd-hash
 	     :src-shortkey? 't
 	     :in-debugger? nil
+	     :callback-loc-fn (gethash "loc-callback-fn" regexp-hash)
+	     :callback-eval-filter (gethash "callback-eval-filter"
+					    regexp-hash)
 	     ))
       (setq font-lock-keywords (realgud-cmdbuf-pat "font-lock-keywords"))
       (if font-lock-keywords

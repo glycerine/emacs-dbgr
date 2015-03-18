@@ -1,16 +1,33 @@
-;;; Copyright (C) 2011-2013 Rocky Bernstein <rocky@gnu.org>
-(declare-function realgud-terminate &optional cmdbuf)
+;; Copyright (C) 2015 Free Software Foundation, Inc
+
+;; Author: Rocky Bernstein <rocky@gnu.org>
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+(declare-function realgud:terminate &optional cmdbuf)
 
 (defconst realgud-track-char-range 10000
   "Max number of characters from end of buffer to search for stack entry.")
 
 ;; Shell process buffers that we can hook into:
 (require 'esh-mode)
+(require 'ansi-color)
 (require 'comint)
 
 (require 'load-relative)
 (require-relative-list
- '("file"           "fringe"
+ '("core"           "file"     "fringe"
    "helper"         "init"     "loc"    "lochist"
    "regexp"         "shortkey" "window"
    "bp"
@@ -24,9 +41,43 @@
   :type 'symbolp
   :group 'realgud)
 
+(declare-function fn-p-to-fn?-alias                   'realgud-helper)
+(declare-function realgud-bp-add-info                 'realgud-bp)
+(declare-function realgud-bp-del-info                 'realgud-bp)
+(declare-function realgud-cmdbuf-add-srcbuf           'realgud-buffer-command)
+(declare-function realgud-cmdbuf-debugger-name        'realgud-buffer-command)
+(declare-function realgud-cmdbuf-info-bp-list=        'realgud-buffer-command)
+(declare-function realgud-cmdbuf-info-divert-output?= 'realgud-buffer-command)
+(declare-function realgud-cmdbuf-info-in-debugger?    'realgud-buffer-command)
+(declare-function realgud-cmdbuf-info-in-debugger?=   'realgud-buffer-command)
+(declare-function realgud-cmdbuf-info-last-input-end= 'realgud-buffer-command)
+(declare-function realgud-cmdbuf-init                 'realgud-buffer-command)
+(declare-function realgud-cmdbuf-loc-hist             'realgud-buffer-command)
+(declare-function realgud-cmdbuf-mode-line-update     'realgud-buffer-command)
+(declare-function realgud-cmdbuf-mode-line-update     'realgud-buffer-command)
+(declare-function realgud-cmdbuf-pat                  'realgud-buffer-command)
+(declare-function realgud-cmdbuf?                     'realgud-buffer-command)
+(declare-function realgud-cmdbuf-info-in-srcbuf?=     'realgud-buffer-command)
+(declare-function realgud:debugger-name-transform     'realgud-helper)
+(declare-function realgud:terminate                   'realgud-core)
+(declare-function realgud:file-loc-from-line          'realgud-file)
+(declare-function realgud-fringe-history-set          'realgud-fringe)
+(declare-function realgud-get-cmdbuf                  'realgud-buffer-command)
+(declare-function realgud-get-srcbuf-from-cmdbuf      'realgud-buffer-helper)
+(declare-function realgud-loc-goto                    'realgud-loc)
+(declare-function realgud-loc-hist-add                'realgud-lochist)
+(declare-function realgud-loc-hist-index              'realgud-lochist)
+(declare-function realgud-loc-hist-item               'realgud-lochist)
+(declare-function realgud-loc?                        'realgud-loc)
+(declare-function realgud-short-key-mode-setup        'realgud-shortkey)
+(declare-function realgud-srcbuf-init-or-update       'realgud-source)
+(declare-function realgud-srcbuf-loc-hist             'realgud-source)
+(declare-function realgud-window-src                  'realgud-window)
+(declare-function realgud-window-src-undisturb-cmd    'realgud-window)
+(declare-function realgud-window-update-position      'realgud-window)
+
 (make-variable-buffer-local  (defvar realgud-track-mode))
 (fn-p-to-fn?-alias 'realgud-loc-p)
-(declare-function realgud-loc?(loc))
 
 (defvar realgud-track-divert-string)
 
@@ -42,20 +93,29 @@ marks set in buffer-local variables to extract text"
   ;; monitor to the point where we have the next dbgr prompt, and then
   ;; check all text from comint-last-input-end to process-mark.
 
-  ; FIXME: Add unwind-protect?
+  ;; FIXME: Add unwind-protect?
   (if (and realgud-track-mode (realgud-cmdbuf? (current-buffer)))
       (let* ((cmd-buff (current-buffer))
 	     (cmd-mark (point-marker))
 	     (curr-proc (get-buffer-process cmd-buff))
+	     (cmdbuf-last-output-end
+	      (realgud-cmdbuf-info-last-input-end realgud-cmdbuf-info))
 	     (last-output-end (process-mark curr-proc))
 	     (last-output-start (max comint-last-input-end
 				     (- last-output-end realgud-track-char-range))))
-	;; Sometimes e get called twice and the second time nothing
-	;; Changes. Guard against this.
+	;; Sometimes we get called twice and the second time nothing
+	;; changes. Guard against this.
 	(unless (= last-output-start last-output-end)
-	  (realgud-track-from-region last-output-start
-				  last-output-end cmd-mark cmd-buff
-				  't 't))
+	  (unless (= last-output-end cmdbuf-last-output-end)
+	    (setq last-output-start (max last-output-start
+					 cmdbuf-last-output-end))
+	    )
+	  ;; Done with using old command buffer's last-input-end.
+	  ;; Update that for next time.
+	  (realgud-cmdbuf-info-last-input-end= last-output-start)
+	  (realgud:track-from-region last-output-start
+				     last-output-end cmd-mark cmd-buff
+				     't 't))
 	)
     )
   )
@@ -69,7 +129,7 @@ marks set in buffer-local variables to extract text"
   (if realgud-track-mode
       (lexical-let* ((cmd-buff (current-buffer))
 		     (cmd-mark (point-marker))
-		     (loc (realgud-track-from-region eshell-last-output-start
+		     (loc (realgud:track-from-region eshell-last-output-start
 						  eshell-last-output-end cmd-mark)))
 	(realgud-track-loc-action loc cmd-buff 't)))
   )
@@ -84,8 +144,8 @@ marks set in buffer-local variables to extract text"
       (realgud-track-loc text (point-marker))
     ))
 
-(defun realgud-track-from-region(from to &optional cmd-mark opt-cmdbuf
-				   shortkey-on-tracing? no-warn-if-no-match?)
+(defun realgud:track-from-region(from to &optional cmd-mark opt-cmdbuf
+				      shortkey-on-tracing? no-warn-if-no-match?)
   "Find and position a buffer at the location found in the marked region.
 
 You might want to use this function interactively after marking a
@@ -100,7 +160,7 @@ evaluating (realgud-cmdbuf-info-loc-regexp realgud-cmdbuf-info)"
   (interactive "r")
   (if (> from to) (psetq to from from to))
   (let* ((text (buffer-substring-no-properties from to))
-	 (loc (realgud-track-loc text cmd-mark nil nil nil no-warn-if-no-match?))
+	 (loc (realgud-track-loc text cmd-mark))
 	 ;; If we see a selected frame number, it is stored
 	 ;; in frame-num. Otherwise, nil.
 	 (frame-num)
@@ -134,6 +194,14 @@ evaluating (realgud-cmdbuf-info-loc-regexp realgud-cmdbuf-info)"
 		    (realgud-cmdbuf-info-in-debugger?= 't)
 		    (realgud-cmdbuf-mode-line-update)
 		    )
+		(progn
+		  (setq bp-loc (realgud-track-bp-delete text-sans-loc cmd-mark cmdbuf))
+		  (if bp-loc
+		      (let ((src-buffer (realgud-loc-goto bp-loc)))
+			(realgud-cmdbuf-add-srcbuf src-buffer cmdbuf)
+			(with-current-buffer src-buffer
+			  (realgud-bp-del-info bp-loc)
+			  ))))
 		)
 	      )
 	  )
@@ -268,6 +336,12 @@ encountering a new loc."
 	  (with-current-buffer srcbuf
 	    (realgud-window-src srcbuf)
 	    (realgud-window-update-position srcbuf realgud-overlay-arrow1))
+	  ;; reset 'in-srcbuf' to allow the command buffer to keep point focus
+	  ;; when used directly. 'in-srcbuf' is set 't' early in the stack
+	  ;; (prior to common command code, e.g. this) when any command is run
+	  ;; from a source buffer
+	  (with-current-buffer cmdbuf
+	    (realgud-cmdbuf-info-in-srcbuf?= nil))
 	  )
 	))
   )
@@ -293,24 +367,40 @@ Otherwise return nil."
 			   (realgud-sget 'cmdbuf-info 'file-group)))
 	   (line-group (or opt-line-group
 			   (realgud-sget 'cmdbuf-info 'line-group)))
+	   (text-group (realgud-sget 'cmdbuf-info 'text-group))
 	   (ignore-file-re (or opt-ignore-file-re
 			       (realgud-sget 'cmdbuf-info 'ignore-file-re)))
+	   (callback-loc-fn (realgud-sget 'cmdbuf-info 'callback-loc-fn))
 	   )
 	(if loc-regexp
 	    (if (string-match loc-regexp text)
 		(let* ((filename (match-string file-group text))
 		       (line-str (match-string line-group text))
+		       (source-str (and text-group
+					(match-string text-group text)))
 		       (lineno (string-to-number (or line-str "1"))))
-		  (unless line-str (message "line number not found -- using 1"))
-		  (if (and filename lineno)
-		      (realgud-file-loc-from-line filename lineno cmd-mark nil
-					       ignore-file-re)
-		    nil))
-	      (unless no-warn-on-no-match?
-		(message "Unable to file and line number for given line"))
-	      )
-	  (and (message (concat "Buffer variable for regular expression pattern not"
-				" given and not passed as a parameter")) nil)))
+		  (when source-str
+		    (setq source-str (ansi-color-filter-apply
+				      source-str)))
+		  (cond (callback-loc-fn
+			 (funcall callback-loc-fn text
+				  filename lineno source-str
+				  ignore-file-re cmd-mark))
+			('t
+			 (unless line-str
+			   (message "line number not found -- using 1"))
+			 (if (and filename lineno)
+			     (realgud:file-loc-from-line filename lineno
+							 cmd-mark
+							 source-str nil
+							 ignore-file-re)
+			   ;; else
+			   nil)))))
+	  ;; else
+	  (and (message
+		(concat "Buffer variable for regular expression pattern not"
+			" given and not passed as a parameter")) nil)))
+    ;; else
     (and (message "Current buffer %s is not a debugger command buffer"
 		  (current-buffer)) nil)
     )
@@ -337,6 +427,7 @@ Otherwise return nil. CMD-MARK is set in the realgud-loc object created.
 		    (loc-regexp     (realgud-loc-pat-regexp loc-pat))
 		    (file-group     (realgud-loc-pat-file-group loc-pat))
 		    (line-group     (realgud-loc-pat-line-group loc-pat))
+		    (text-group     (realgud-loc-pat-text-group loc-pat))
 		    (ignore-file-re (realgud-loc-pat-ignore-file-re loc-pat))
 		    )
 		(if loc-regexp
@@ -344,15 +435,17 @@ Otherwise return nil. CMD-MARK is set in the realgud-loc object created.
 			(let* ((bp-num (match-string bp-num-group text))
 			       (filename (match-string file-group text))
 			       (line-str (match-string line-group text))
+			       (source-str (and text-group (match-string text-group text)))
 			       (lineno (string-to-number (or line-str "1")))
 			       )
 			  (unless line-str
 			    (message "line number not found -- using 1"))
 			  (if (and filename lineno)
 			      (let ((loc-or-error
-				     (realgud-file-loc-from-line
+				     (realgud:file-loc-from-line
 				      filename lineno
 				      cmd-mark
+				      source-str
 				      (string-to-number bp-num)
 				      ignore-file-re
 				      )))
@@ -369,6 +462,51 @@ Otherwise return nil. CMD-MARK is set in the realgud-loc object created.
 				    ;; Set to return location
 				    loc-or-error)))
 			    nil)))
+		  nil))
+	    nil))
+      (and (message "Current buffer %s is not a debugger command buffer"
+		    (current-buffer)) nil)
+      )
+    )
+)
+
+(defun realgud-track-bp-delete(text &optional cmd-mark cmdbuf ignore-file-re)
+  "Do regular-expression matching see if a breakpoint has been delete inside
+string TEXT. If we match, we will return the location of the breakpoint found
+from in command buffer. Otherwise nil is returned."
+
+  ; NOTE: realgud-cmdbuf-info is a buffer variable local to the process
+  ; running the debugger. It contains a realgud-cmdbuf-info "struct". In
+  ; that struct is the regexp hash to match positions. By setting the
+  ; the fields of realgud-cmdbuf-info appropriately we can accomodate a
+  ; family of debuggers -- one at a time -- for the buffer process.
+
+  (setq cmdbuf (or cmdbuf (current-buffer)))
+  (with-current-buffer cmdbuf
+    (if (realgud-cmdbuf?)
+	(let* ((loc-pat (realgud-cmdbuf-pat "brkpt-del"))
+	       (found-loc nil)
+	       )
+	  (if loc-pat
+	      (let ((bp-num-group   (realgud-loc-pat-num loc-pat))
+		    (loc-regexp     (realgud-loc-pat-regexp loc-pat))
+		    (loc))
+		(if (and loc-regexp (string-match loc-regexp text))
+		    (let* ((bp-num (string-to-number (match-string bp-num-group text)))
+			   (info realgud-cmdbuf-info)
+			   (bp-list (realgud-cmdbuf-info-bp-list info))
+			   )
+		      (while (and (not found-loc) (setq loc (car-safe bp-list)))
+			(setq bp-list (cdr bp-list))
+			(if (eq (realgud-loc-num loc) bp-num)
+			    (progn
+			      (setq found-loc loc)
+			      ;; Remove loc from breakpoint list
+			      (realgud-cmdbuf-info-bp-list=
+			       (remove loc (realgud-cmdbuf-info-bp-list info))))
+			))
+		      ;; return the location:
+		      found-loc)
 		  nil))
 	    nil))
       (and (message "Current buffer %s is not a debugger command buffer"
@@ -411,13 +549,13 @@ loc-regexp pattern"
 
 
 (defun realgud-track-termination?(text)
-  "Return 't and call realgud-terminate-cmdbuf we we have a termination message"
+  "Return 't and call `realgud:terminate' we we have a termination message"
   (if (realgud-cmdbuf?)
       (let ((termination-re (realgud-cmdbuf-pat "termination"))
 	    )
 	(if (and termination-re (string-match termination-re text))
 	    (progn
-	      (realgud-terminate (current-buffer))
+	      (realgud:terminate (current-buffer))
 	      't)
 	  nil)
 	)
@@ -440,8 +578,10 @@ loc-regexp pattern"
 			  (substring text 0 (match-beginning 0)))
 		    ;; We've got desired output, so reset divert output.
 		    (realgud-cmdbuf-info-divert-output?= nil)
-		    (kill-region realgud-last-output-start to)
-		    ;; FIXME: DELETE output. Or do elsewhere?
+		    (cond ((search-backward-regexp prompt-regexp)
+			   (kill-region realgud-last-output-start (point))
+			   (goto-char (point-max)))
+			  ('t (kill-region realgud-last-output-start to)))
 		    )
 	      ))
 	  )
@@ -485,7 +625,7 @@ find a location. non-nil if we can find a location.
       ))
     )
 
-(defun realgud-track-set-debugger (debugger-name)
+(defun realgud:track-set-debugger (debugger-name)
   "Set debugger name and information associated with that debugger for
 the buffer process. This info is returned or nil if we can't find a
 debugger with that information"
@@ -495,28 +635,26 @@ debugger with that information"
 
   (let ((regexp-hash (gethash debugger-name realgud-pat-hash))
 	(command-hash (gethash debugger-name realgud-command-hash))
+	(transform-name debugger-name)
 	)
+    (unless regexp-hash
+      (setq transform-name (realgud:debugger-name-transform debugger-name))
+      (setq regexp-hash (gethash transform-name realgud-pat-hash))
+      (setq command-hash (gethash transform-name realgud-command-hash))
+      )
     (if regexp-hash
-	(let* ((prefix
-		(cond
-		 ((equal debugger-name "gdb") "realgud-gdb")
-		 ((or (equal debugger-name "trepan.pl")
-		      (equal debugger-name "trepanpl"))
-			     "realgud-trepanpl")
-		 ((or (equal debugger-name "perldb")
-		      (equal debugger-name "perl5db"))
-		      "realgud-perldb")
-		 ('t debugger-name)))
+	(let* ((prefix (realgud:debugger-name-transform debugger-name))
+	       (mode-name (concat " " (capitalize prefix) "-Track"))
 	       (specific-track-mode (intern (concat prefix "-track-mode")))
 	       )
-	  (realgud-cmdbuf-init (current-buffer) debugger-name regexp-hash
+	  (realgud-cmdbuf-init (current-buffer) transform-name regexp-hash
 			    command-hash)
 	  (if (and (not (eval specific-track-mode))
 		   (functionp specific-track-mode))
 	      (funcall specific-track-mode 't))
 	  )
       (progn
-	(message "I Don't have %s listed as a debugger." debugger-name)
+	(message "I don't have %s listed as a debugger." debugger-name)
 	nil)
       )))
 
@@ -538,7 +676,7 @@ described by PT."
     )
   )
 
-(defun realgud-goto-debugger-backtrace-line (pt)
+(defun realgud:goto-debugger-backtrace-line (pt)
   "Display the location mentioned by the debugger backtrace line
 described by PT."
   (interactive "d")
@@ -546,7 +684,7 @@ described by PT."
     (message "Didn't match a debugger backtrace location.")
     ))
 
-(defun realgud-goto-lang-backtrace-line (pt)
+(defun realgud:goto-lang-backtrace-line (pt)
   "Display the location mentioned by the programming-language backtrace line
 described by PT."
   (interactive "d")

@@ -15,7 +15,7 @@
 
 ;; FIXME: I think the following could be generalized and moved to
 ;; realgud-... probably via a macro.
-(defvar pydbgr-minibuffer-history nil
+(defvar realgud:pydbgr-minibuffer-history nil
   "minibuffer history list for the command `pydbgr'.")
 
 (easy-mmode-defmap pydbgr-minibuffer-local-map
@@ -29,7 +29,7 @@
   (realgud-query-cmdline
    'pydbgr-suggest-invocation
    pydbgr-minibuffer-local-map
-   'pydbgr-minibuffer-history
+   'realgud:pydbgr-minibuffer-history
    opt-debugger))
 
 (defun pydbgr-parse-cmd-args (orig-args)
@@ -136,11 +136,14 @@ NOTE: the above should have each item listed in quotes.
 	   )))
       (list interpreter-args debugger-args script-args annotate-p))))
 
-(defvar pydbgr-command-name) ; # To silence Warning: reference to free variable
+;; To silence Warning: reference to free variable
+(defvar realgud:pydbgr-command-name)
+
 (defun pydbgr-suggest-invocation (debugger-name)
   "Suggest a pydbgr command invocation via `realgud-suggest-invocaton'"
-  (realgud-suggest-invocation pydbgr-command-name pydbgr-minibuffer-history
-			   "python" "\\.py"))
+  (realgud-suggest-invocation realgud:pydbgr-command-name
+			      realgud:pydbgr-minibuffer-history
+			      "python" "\\.py"))
 
 (defun pydbgr-reset ()
   "Pydbgr cleanup - remove debugger's internal buffers (frame,
@@ -161,9 +164,9 @@ breakpoints, etc.)."
 ;; 	  pydbgr-debugger-support-minor-mode-map-when-deactive))
 
 
-(defun pydbgr-customize ()
+(defun realgud:pydbgr-customize ()
   "Use `customize' to edit the settings of the `pydbgr' debugger."
   (interactive)
-  (customize-group 'pydbgr))
+  (customize-group 'realgud:pydbgr))
 
 (provide-me "realgud-pydbgr-")

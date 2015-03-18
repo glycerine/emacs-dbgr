@@ -1,9 +1,19 @@
 (require 'test-simple)
+(require 'load-relative)
 (load-file "../realgud/common/buffer/command.el")
 (load-file "../realgud/debugger/gdb/init.el")
 (load-file "./regexp-helper.el")
 
+(declare-function __FILE__              'load-relative)
+
 (test-simple-start)
+
+(eval-when-compile
+  (defvar dbg-name)   (defvar realgud-pat-hash)   (defvar realgud-bt-hash)
+  (defvar loc-pat)    (defvar prompt-pat)         (defvar s1)
+  (defvar file-group) (defvar line-group)         (defvar pos)
+  (defvar test-dbgr)  (defvar test-text)
+)
 
 ; Some setup usually done in setting up the buffer.
 ; We customize this for this debugger.
@@ -11,7 +21,7 @@
 (setq dbg-name "gdb")
 
 (setq loc-pat (gethash "loc" (gethash dbg-name realgud-pat-hash)))
-(setq dbgr (make-realgud-cmdbuf-info
+(setq test-dbgr (make-realgud-cmdbuf-info
 		  :debugger-name dbg-name
 		  :loc-regexp (realgud-loc-pat-regexp loc-pat)
 		  :file-group (realgud-loc-pat-file-group loc-pat)
@@ -20,19 +30,19 @@
 ;; FIXME: we get a void variable somewhere in here when running
 ;;        even though we define it in lexical-let. Dunno why.
 ;;        setq however will workaround this.
-(setq text "/home/rocky/c/ctest.c:80:2000:beg:0x8048748>")
+(setq test-text "/home/rocky/c/ctest.c:80:2000:beg:0x8048748>")
 (note "traceback location matching")
 
-(assert-t (numberp (cmdbuf-loc-match text dbgr)) "basic location")
+(assert-t (numberp (cmdbuf-loc-match test-text test-dbgr)) "basic location")
 (assert-equal "/home/rocky/c/ctest.c"
-	      (match-string (realgud-cmdbuf-info-file-group dbgr)
-			    text) "extract file name")
+	      (match-string (realgud-cmdbuf-info-file-group test-dbgr)
+			    test-text) "extract file name")
 (assert-equal "80"
-	      (match-string (realgud-cmdbuf-info-line-group dbgr)
-			    text) "extract line number")
+	      (match-string (realgud-cmdbuf-info-line-group test-dbgr)
+			    test-text) "extract line number")
 (note "debugger-backtrace")
 (setq realgud-bt-pat  (gethash "debugger-backtrace"
-			    realgud-gdb-pat-hash))
+			    realgud:gdb-pat-hash))
 (setq s1
       "#0  main (argc=2, argv=0xbffff564, envp=0xbffff570) at main.c:935
 #1  0xb7e9f4a5 in *__GI___strdup (s=0xbffff760 \"/tmp/remake/remake\") at strdup.c:42
@@ -92,7 +102,7 @@
 
 (note "prompt")
 (set (make-local-variable 'prompt-pat)
-     (gethash "prompt" realgud-gdb-pat-hash))
+     (gethash "prompt" realgud:gdb-pat-hash))
 (prompt-match "(gdb) ")
 
 (end-tests)

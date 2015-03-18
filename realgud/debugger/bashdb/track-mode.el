@@ -1,5 +1,5 @@
-;;; Copyright (C) 2012-2013 Rocky Bernstein <rocky@gnu.org>
-;;; Bash Debugger tracking a comint or eshell buffer.
+;;; Copyright (C) 2012-2015 Rocky Bernstein <rocky@gnu.org>
+;;; Bash Debugger tracking in a comint buffer.
 
 (eval-when-compile (require 'cl))
 (require 'load-relative)
@@ -10,12 +10,17 @@
 			 "../../common/track-mode"
 			 )
 		       "realgud-")
-(require-relative-list '("core" "init") "realgud-bashdb-")
+(require-relative-list '("core" "init") "realgud:bashdb-")
+(require-relative "../../lang/posix-shell" nil "realgud-lang-")
+
+(declare-function realgud-track-mode 'realgud-track-mode)
+(declare-function realgud-track-mode-hook 'realgud-track-mode)
+(declare-function realgud-track-mode-setup   'realgud-track-mode)
+(declare-function realgud:track-set-debugger 'realgud-track-mode)
+(declare-function realgud-posix-shell-populate-command-keys
+		  'realgud-lang-posix-shell)
 
 (realgud-track-mode-vars "bashdb")
-(realgud-posix-shell-populate-command-keys bashdb-track-mode-map)
-
-(declare-function realgud-track-mode(bool))
 
 (defun bashdb-track-mode-hook()
   (if bashdb-track-mode
@@ -27,15 +32,19 @@
 )
 
 (define-minor-mode bashdb-track-mode
-  "Minor mode for tracking ruby debugging inside a process shell."
+  "Minor mode for tracking bashdb source locations inside a process shell via realgud. bashdb is a Bash debugger. See URL `http://bashdb.sf.net'.
+
+If called interactively with no prefix argument, the mode is toggled. A prefix argument, captured as ARG, enables the mode if the argument is positive, and disables it otherwise.
+
+\\{bashdb-track-mode-map}"
   :init-value nil
   ;; :lighter " bashdb"   ;; mode-line indicator from realgud-track is sufficient.
   ;; The minor mode bindings.
   :global nil
-  :group 'bashdb
+  :group 'realgud:bashdb
   :keymap bashdb-track-mode-map
 
-  (realgud-track-set-debugger "bashdb")
+  (realgud:track-set-debugger "bashdb")
   (if bashdb-track-mode
       (progn
         (realgud-track-mode-setup 't)
@@ -45,4 +54,6 @@
       ))
 )
 
-(provide-me "realgud-bashdb-")
+(define-key bashdb-short-key-mode-map "T" 'realgud:cmd-backtrace)
+
+(provide-me "realgud:bashdb-")

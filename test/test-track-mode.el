@@ -6,13 +6,14 @@
 
 (declare-function realgud-cmdbuf-init 'realgud-buffer-command)
 (declare-function realgud-srcbuf-init 'realgud-buffer-source)
+(declare-function __FILE__            'load-relative)
 
 (test-simple-start)
 
 (defvar realgud-pat-hash)
 (defvar temp-cmdbuf nil)
 
-(declare-function trepan-track-mode 'realgud-trepan)
+(declare-function trepan-track-mode 'realgud:trepan)
 (declare-function realgud-track-mode-vars 'realgud-track-mode)
 (declare-function realgud-backtrace-mode 'realgud-backtrace-mode)
 
@@ -24,9 +25,7 @@
   (realgud-cmdbuf-init temp-cmdbuf "trepan" (gethash "trepan" realgud-pat-hash))
   (with-current-buffer temp-cmdbuf
     (trepan-track-mode 't))
-  (realgud-srcbuf-init (current-buffer) temp-cmdbuf
-		    "trepan"
-		    '("/bin/trepan" "my-script" "arg1"))
+  (realgud-srcbuf-init (current-buffer) temp-cmdbuf)
 )
 
 (defun tear-down()

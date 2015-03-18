@@ -1,6 +1,7 @@
-;;; Copyright (C) 2010 Rocky Bernstein <rocky@gnu.org>
+;;; Copyright (C) 2010, 2014 Rocky Bernstein <rocky@gnu.org>
 ;;; Miscellaneous utility functions
 (require 'load-relative)
+
 (defun fn-p-to-fn?-alias (fn-sym)
   "FN-SYM is assumed to be a symbol which is a function.  If it
 ends in a 'p' or '-p', that suffix is stripped; in either case, a
@@ -18,6 +19,21 @@ function FN-SYM."
 	      (t fn-str)))
 	   (new-fn-sym (intern (concat new-fn-str "?"))))
 	(defalias new-fn-sym fn-sym))))
+
+;; FIXME push the special casing into the debuggers themselves.
+(defun realgud:debugger-name-transform (debugger-name)
+  "In some cases we need to prefix a short debugger name, like
+'gdb' with 'realgud:'. This does that."
+  (let ((debugger-name-short
+	 (file-name-sans-extension (file-name-nondirectory debugger-name))))
+    (cond
+     ((equal debugger-name-short "gdb") "realgud:gdb")
+     ((equal debugger-name-short "jdb") "realgud:jdb")
+     ((equal debugger-name-short "tortoise") "gub")
+     ((or (equal debugger-name "trepan.pl")
+	  (equal debugger-name-short "trepanpl"))
+      "realgud:trepanpl")
+     ('t debugger-name-short))))
 
 (defun buffer-killed? (buffer)
   "Return t if BUFFER is killed."

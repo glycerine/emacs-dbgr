@@ -1,5 +1,5 @@
 ;;; Debugger Backtrace buffer mode settings
-;;; Copyright (C) 2011, 2013 Rocky Bernstein <rocky@gnu.org>
+;;; Copyright (C) 2011, 2013, 2015 Rocky Bernstein <rocky@gnu.org>
 (require 'load-relative)
 (require-relative-list  '("menu" "key") "realgud-")
 (require-relative-list  '("buffer/command") "realgud-buffer-")
@@ -8,27 +8,48 @@
 (declare-function realgud-populate-common-keys 'realgud-menu)
 (declare-function realgud-cmdbuf-pat 'realgud-menu)
 
+(defvar realgud:frames-menu nil
+  "Frames menu in Backtrace menu.")
+
+;; (setq realgud:frames-menu
+;;       (let ((map (make-sparse-keymap "Goto Specific Frames")))
+;; 	(define-key map [frames-menu]
+;; 	  (list 'menu-item "Specific Frames" 'realgud:frames-menu))
+;; 	(realgud-menu-item map "Frame 1" 'realgud-goto-frame-1)
+;; 	(realgud-menu-item map "Frame 2" 'realgud-goto-frame-2)
+;; 	(realgud-menu-item map "Frame 3" 'realgud-goto-frame-3)
+;; 	)
+;;       map)
+
 (defvar realgud-backtrace-mode-map
   (let ((map  (realgud-populate-debugger-menu (make-sparse-keymap))))
     (suppress-keymap map)
     (realgud-populate-common-keys map)
     (define-key map "."       'realgud-backtrace-moveto-frame-selected)
-    (define-key map "r"       'realgud-backtrace-init)
-    (define-key map [double-mouse-1] 'realgud-goto-frame-mouse)
-    (define-key map [mouse-2] 'realgud-goto-frame-mouse)
-    (define-key map [mouse-3] 'realgud-goto-frame-mouse)
+    (define-key map "r"       'realgud:backtrace-init)
+    (define-key map [double-mouse-1] 'realgud:follow-event)
+    (define-key map [mouse-2] 'realgud:follow-event)
+    (define-key map [enter]   'realgud:follow-event)
+    (define-key map [mouse-3] 'realgud:follow-event)
+    (define-key map [enter]   'realgud:follow-event)
+    (define-key map [return]  'realgud:follow-point)
     (define-key map [up]      'realgud-backtrace-moveto-frame-prev)
     (define-key map [down]    'realgud-backtrace-moveto-frame-next)
     (define-key map "l"       'realgud-recenter-arrow)
 
+    (define-key map [frames-menu]
+      (list 'menu-item "Specific Frames" 'realgud:frames-menu))
+
     ;; FIXME: these can go to a common routine. See also shortkey.el and
     ;; key.el
-    (define-key map "<"       'realgud-cmd-newer-frame)
-    (define-key map ">"       'realgud-cmd-older-frame)
-    (define-key map "d"       'realgud-cmd-newer-frame)
-    (define-key map "u"       'realgud-cmd-older-frame)
+    (define-key map "<"       'realgud:cmd-newer-frame)
+    (define-key map ">"       'realgud:cmd-older-frame)
+    (define-key map "d"       'realgud:cmd-newer-frame)
+    (define-key map "u"       'realgud:cmd-older-frame)
+    (define-key map "q"       'realgud:cmd-quit)
     (define-key map "C"       'realgud-window-cmd-undisturb-src)
-    (define-key map "F"       'realgud-window-bt)
+    (define-key map "F"       'realgud:window-bt)
+    (define-key map "I"       'realgud:cmdbuf-info-describe)
     (define-key map "S"       'realgud-window-src-undisturb-cmd)
 
     (define-key map "n"       'realgud-backtrace-moveto-frame-next)
@@ -43,19 +64,15 @@
     (define-key map "7"       'realgud-goto-frame-n)
     (define-key map "8"       'realgud-goto-frame-n)
     (define-key map "9"       'realgud-goto-frame-n)
-    (define-key map [(control m)] 'realgud-goto-frame)
 
-    ;; ;; --------------------
-    ;; ;; The "Stack window" submenu.
-    ;; (let ((submenu (make-sparse-keymap)))
+    ;; --------------------
+    ;; The "Stack window" submenu.
+    ;; (let ((submenu realgud:frames-menu))
     ;;   (define-key-after map [menu-bar debugger stack]
     ;;     (cons "Stack window" submenu)
     ;;     'placeholder))
-
-    ;; (define-key map [menu-bar debugger stack goto]
-    ;;   '(menu-item "Goto frame" realgud-goto-frame))
     map)
-  "Keymap to navigate dbgr stack frames.")
+  "Keymap to navigate realgud stack frames.")
 
 (defun realgud-backtrace-mode (&optional cmdbuf)
   "Major mode for displaying the stack frames.
@@ -64,7 +81,7 @@
   (kill-all-local-variables)
   (setq buffer-read-only 't)
   (setq major-mode 'realgud-backtrace-mode)
-  (setq mode-name "dbgr Stack Frames")
+  (setq mode-name "Realgud Stack Frames")
   ;; (set (make-local-variable 'realgud-secondary-buffer) t)
   (setq mode-line-process 'realgud-mode-line-process)
   (use-local-map realgud-backtrace-mode-map)

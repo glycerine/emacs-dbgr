@@ -11,14 +11,18 @@ lispdir = @lispdir@
 
 include common.mk
 
-PHONY=check clean dist distclean test
+PHONY=check clean dist distclean test check-short check-terse install-short
 
 EXTRA_DIST+=common.mk README.md THANKS
 
 if MAINTAINER_MODE
 
+#: Remove change log: ChangeLog
+rmChangeLog:
+	rm ChangeLog || true
+
 #: Create a ChangeLog file from git logs
-ChangeLog:
+ChangeLog: rmChangeLog
 	git log --pretty --numstat --summary | $(GIT2CL) > $@
 
 ACLOCAL_AMFLAGS=-I .
@@ -30,8 +34,14 @@ test: check
 
 #: Run all tests without bloated output
 check-short:
-	$(MAKE) check 2>&1  | $(RUBY) make-check-filter.rb
+	$(MAKE) check 2>&1  | $(RUBY) test/make-check-filter.rb
+
+#: Run all tests without and show just the failure lines
+check-terse:
+	$(MAKE) check 2>&1  | $(RUBY) tes/make-check-filter.rb | grep failure
 
 #: Run "make install"
 install-short:
-	$(MAKE) install 2>&1  | $(RUBY) make-check-filter.rb
+	$(MAKE) install 2>&1  | $(RUBY) test/make-check-filter.rb
+
+.PHONY: test check check-short rmChangeLog

@@ -2,13 +2,15 @@
 (load-file "../realgud/common/track.el")
 (load-file "../realgud/common/core.el")
 (load-file "../realgud/common/loc.el")
+(load-file "../realgud/debugger/trepan/core.el")
 (load-file "../realgud/debugger/trepan/init.el")
 
+(declare-function __FILE__                     'load-relative)
 (declare-function realgud-cmdbuf-init          'realgud-buffer-command)
 (declare-function realgud-loc-filename         'realgud-loc)
 (declare-function realgud-loc-p                'realgud-loc)
 (declare-function realgud-loc-line-number      'realgud-loc)
-(declare-function realgud-track-from-region    'realgud-track)
+(declare-function realgud:track-from-region    'realgud-track)
 (declare-function realgud-track-loc            'realgud-track)
 (declare-function realgud-track-loc-remaining  'realgud-track)
 (declare-function realgud-track-selected-frame 'realgud-track)
@@ -34,11 +36,11 @@
 
 (setq test-filename (symbol-file 'test-simple))
 (setq line-number 7)
-(setq debugger-output (format "-> (%s:%d)\n(trepan):\n"
+(setq debugger-output (format "-> (%s:%d)\nrequire 'foo'\n(trepan):\n"
 			      test-filename line-number))
 (lexical-let ((loc (realgud-track-loc debugger-output nil)))
   (assert-t (realgud-loc-p loc)   "loc extracted")
-  (assert-equal "\n(trepan):\n"
+  (assert-equal "(trepan):\n"
 		(realgud-track-loc-remaining debugger-output)
 		"loc-remaining")
   (assert-equal test-filename (realgud-loc-filename loc)
@@ -107,7 +109,7 @@ trepan: That's all, folks...
 
 (makunbound 'realgud-cmdbuf-info)
 (assert-raises error
-	       (realgud-track-from-region (point-min)
+	       (realgud:track-from-region (point-min)
 				       (point-max))
 	       "invalid cmdbuf")
 

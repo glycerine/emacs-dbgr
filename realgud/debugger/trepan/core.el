@@ -1,48 +1,106 @@
-;;; Copyright (C) 2010, 2012 Rocky Bernstein <rocky@gnu.org>
+;;; Copyright (C) 2010, 2012, 2014-2015 Rocky Bernstein <rocky@gnu.org>
 (eval-when-compile (require 'cl))
 
+(require 'compile) ;; for compilation-find-file
 (require 'load-relative)
 (require-relative-list '("../../common/track"
                          "../../common/core"
                          "../../common/lang")
                        "realgud-")
-(require-relative-list '("init") "realgud-trepan-")
+(require-relative-list '("init") "realgud:trepan-")
+
+(declare-function realgud:strip              'realgud)
+(declare-function realgud:expand-file-name-if-exists 'realgud-core)
+(declare-function realgud-parse-command-arg  'realgud-core)
+(declare-function realgud-query-cmdline      'realgud-core)
+(declare-function realgud-suggest-invocation 'realgud-core)
+(declare-function realgud:file-loc-from-line 'realgud-file)
 
 ;; FIXME: I think the following could be generalized and moved to
 ;; realgud-... probably via a macro.
-(defvar trepan-minibuffer-history nil
-  "minibuffer history list for the command `trepan'.")
+(defvar realgud:trepan-minibuffer-history nil
+  "minibuffer history list for the command `realgud:trepan'.")
 
 (easy-mmode-defmap trepan-minibuffer-local-map
   '(("\C-i" . comint-dynamic-complete-filename))
   "Keymap for minibuffer prompting of gud startup command."
   :inherit minibuffer-local-map)
 
+(defvar realgud:trepan-file-remap (make-hash-table :test 'equal)
+  "How to remap Python files in trepan when we otherwise can't
+  find in the filesystem. The hash key is the file string we saw,
+  and the value is associated filesystem string presumably in the
+  filesystem")
+
+;; FIXME: this code could be generalized and put in a common place.
+(defun realgud:trepan-find-file(filename)
+  "A find-file specific for trepan. We strip off trailing
+blanks. Failing that we will prompt for a mapping and save that
+in variable `realgud:trepan-file-remap' when that works. In the
+future, we may also consult RUBYPATH."
+  (let* ((transformed-file)
+	 (stripped-filename (realgud:strip filename))
+	 ;; (ignore-file-re)
+	)
+    (cond
+     ((file-exists-p filename) filename)
+     ((file-exists-p stripped-filename) stripped-filename)
+     ;; ((string-match ((ignore-file-re filename)
+     ;; 	(message "tracking ignored for psuedo-file: %s" filename) nil)
+     ('t
+      ;; FIXME search RUBYLIB if not absolute file?
+      (if (gethash filename realgud-file-remap)
+	  (let ((remapped-filename))
+	    (setq remapped-filename (gethash filename realgud:trepan-file-remap))
+	    (if (file-exists-p remapped-filename)
+		remapped-filename
+	      ;; else
+	      (and (remhash filename realgud-file-remap)) nil)
+	    ;; else
+	    (let ((remapped-filename))
+	      (setq remapped-filename
+		    (buffer-file-name
+		     (compilation-find-file (point-marker) stripped-filename
+					    nil "%s.rb")))
+	      (when (and remapped-filename (file-exists-p remapped-filename))
+		(puthash filename remapped-filename realgud-file-remap)
+		remapped-filename
+		))
+	    ))
+      ))
+    ))
+
+(defun realgud:trepan-loc-fn-callback(text filename lineno source-str
+					   ignore-file-re cmd-mark)
+  (realgud:file-loc-from-line filename lineno
+			      cmd-mark source-str nil nil
+			      'realgud:trepan-find-file))
+
 ;; FIXME: I think this code and the keymaps and history
 ;; variable chould be generalized, perhaps via a macro.
-(defun trepan-query-cmdline (&optional opt-debugger)
+(defun realgud:trepan-query-cmdline (&optional opt-debugger)
   (realgud-query-cmdline
    'trepan-suggest-invocation
    trepan-minibuffer-local-map
-   'trepan-minibuffer-history
+   'realgud:trepan-minibuffer-history
    opt-debugger))
 
-(defun trepan-parse-cmd-args (orig-args)
+(defun realgud:trepan-parse-cmd-args (orig-args)
   "Parse command line ARGS for the annotate level and name of script to debug.
 
-ARGS should contain a tokenized list of the command line to run.
+ORIG-ARGS should contain a tokenized list of the command line to run.
 
 We return the a list containing
 
-- the command processor (e.g. ruby) and it's arguments if any - a
+* the command processor (e.g. ruby) and it's arguments if any - a
   list of strings
 
-- the name of the debugger given (e.g. trepan) and its arguments
+* the name of the debugger given (e.g. trepan) and its arguments
   - a list of strings
 
-- the script name and its arguments - list of strings
+* the script name and its arguments - list of strings
 
-- whether the annotate or emacs option was given ('-A',
+* whether the annotate or emacs option was given ('-A',
   '--annotate' or '--emacs) - a boolean
 
 For example for the following input
@@ -52,7 +110,7 @@ For example for the following input
 we might return:
    ((ruby1.9 -W -C) (trepan --emacs) (./gcd.rb a b) 't)
 
-NOTE: the above should have each item listed in quotes.
+Note that the script name path has been expanded via `expand-file-name'.
 "
 
   ;; Parse the following kind of pattern:
@@ -124,6 +182,12 @@ NOTE: the above should have each item listed in quotes.
            ((string-match "^--annotate=[0-9]" arg)
             (nconc debugger-args (list (pop args)) )
             (setq annotate-p t))
+	   ;; path-argument options
+	   ((member arg '("--include" "-I" "--require" "-I"))
+	    (setq arg (pop args))
+	    (nconc debugger-args
+		   (list arg (realgud:expand-file-name-if-exists
+			      (pop args)))))
            ;; Options with arguments.
            ((string-match "^-" arg)
             (setq pair (realgud-parse-command-arg
@@ -131,16 +195,19 @@ NOTE: the above should have each item listed in quotes.
             (nconc debugger-args (car pair))
             (setq args (cadr pair)))
            ;; Anything else must be the script to debug.
-           (t (setq script-name arg)
-              (setq script-args args))
+	   (t (setq script-name (realgud:expand-file-name-if-exists arg))
+	      (setq script-args (cons script-name (cdr args))))
            )))
       (list interpreter-args debugger-args script-args annotate-p))))
 
-(defvar trepan-command-name) ; # To silence Warning: reference to free variable
+;; To silence Warning: reference to free variable
+(defvar realgud:trepan-command-name)
+
 (defun trepan-suggest-invocation (debugger-name)
   "Suggest a trepan command invocation via `realgud-suggest-invocaton'"
-  (realgud-suggest-invocation trepan-command-name trepan-minibuffer-history
-                           "ruby" "\\.rb$" "trepan"))
+  (realgud-suggest-invocation realgud:trepan-command-name
+			      realgud:trepan-minibuffer-history
+			      "ruby" "\\.rb$" "trepan"))
 
 (defun trepan-reset ()
   "Trepan cleanup - remove debugger's internal buffers (frame,
@@ -161,9 +228,9 @@ breakpoints, etc.)."
 ;;        trepan-debugger-support-minor-mode-map-when-deactive))
 
 
-(defun trepan-customize ()
+(defun realgud:trepan-customize ()
   "Use `customize' to edit the settings of the `trepan' debugger."
   (interactive)
-  (customize-group 'trepan))
+  (customize-group 'realgud:trepan))
 
-(provide-me "realgud-trepan-")
+(provide-me "realgud:trepan-")

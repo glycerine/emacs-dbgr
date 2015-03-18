@@ -1,23 +1,81 @@
-;;; Copyright (C) 2010 Rocky Bernstein <rocky@gnu.org>
+;;; Copyright (C) 2010, 2014-2015 Rocky Bernstein <rocky@gnu.org>
 (eval-when-compile (require 'cl))
 
+(require 'compile) ;; for compilation-find-file
 (require 'load-relative)
 (require-relative-list '("../../common/track"
 			 "../../common/core"
+                         "../../common/file"
 			 "../../common/lang")
 		       "realgud-")
-(require-relative-list '("init") "realgud-trepan2-")
+(require-relative-list '("init") "realgud:trepan2-")
 
+(declare-function realgud:strip              'realgud)
+(declare-function realgud:expand-file-name-if-exists 'realgud-core)
+(declare-function realgud-parse-command-arg  'realgud-core)
+(declare-function realgud-query-cmdline      'realgud-core)
+(declare-function realgud-suggest-invocation 'realgud-core)
+(declare-function realgud:file-loc-from-line 'realgud-file)
 
 ;; FIXME: I think the following could be generalized and moved to
 ;; realgud-... probably via a macro.
-(defvar trepan2-minibuffer-history nil
-  "minibuffer history list for the command `trepan2'.")
+(defvar realgud:trepan2-minibuffer-history nil
+  "minibuffer history list for the command `realgud:trepan2'.")
 
 (easy-mmode-defmap trepan2-minibuffer-local-map
   '(("\C-i" . comint-dynamic-complete-filename))
   "Keymap for minibuffer prompting of gud startup command."
   :inherit minibuffer-local-map)
+
+(defvar realgud:trepan2-file-remap (make-hash-table :test 'equal)
+  "How to remap Python files in trepan2 when we otherwise can't
+  find in the filesystem. The hash key is the file string we saw,
+  and the value is associated filesystem string presumably in the
+  filesystem")
+
+;; FIXME: this code could be generalized and put in a common place.
+(defun realgud:trepan2-find-file(filename)
+  "A find-file specific for python/trepan. We strip off trailing
+blanks. Failing that we will prompt for a mapping and save that
+in variable `realgud:trepan2-file-remap' when that works. In the future,
+we may also consult PYTHONPATH."
+  (let* ((transformed-file)
+	 (stripped-filename (realgud:strip filename))
+	 (ignore-file-re realgud-python-ignore-file-re)
+	)
+    (cond
+     ((file-exists-p filename) filename)
+     ((file-exists-p stripped-filename) stripped-filename)
+     ((string-match ignore-file-re filename)
+	(message "tracking ignored for psuedo-file: %s" filename) nil)
+     ('t
+      ;; FIXME search PYTHONPATH if not absolute file
+      (if (gethash filename realgud-file-remap)
+	  (let ((remapped-filename))
+	    (setq remapped-filename (gethash filename realgud:trepan2-file-remap))
+	    (if (file-exists-p remapped-filename)
+		remapped-filename
+	      ;; else
+	      (and (remhash filename realgud-file-remap)) nil)
+	    ;; else
+	    (let ((remapped-filename))
+	      (setq remapped-filename
+		    (buffer-file-name
+		     (compilation-find-file (point-marker) stripped-filename
+					    nil "%s.py")))
+	      (when (and remapped-filename (file-exists-p remapped-filename))
+		(puthash filename remapped-filename realgud-file-remap)
+		remapped-filename
+		))
+	    ))
+      ))
+    ))
+
+(defun realgud:trepan2-loc-fn-callback(text filename lineno source-str
+					    ignore-file-re cmd-mark)
+  (realgud:file-loc-from-line filename lineno
+			      cmd-mark source-str nil nil
+			      'realgud:trepan2-find-file))
 
 ;; FIXME: I think this code and the keymaps and history
 ;; variable chould be generalized, perhaps via a macro.
@@ -25,13 +83,13 @@
   (realgud-query-cmdline
    'trepan2-suggest-invocation
    trepan2-minibuffer-local-map
-   'trepan2-minibuffer-history
+   'realgud:trepan2-minibuffer-history
    opt-debugger))
 
 (defun trepan2-parse-cmd-args (orig-args)
   "Parse command line ARGS for the annotate level and name of script to debug.
 
-ARGS should contain a tokenized list of the command line to run.
+ORIG-ARGS should contain a tokenized list of the command line to run.
 
 We return the a list containing
 - the command processor (e.g. python) and it's arguments if any - a list of strings
@@ -127,16 +185,20 @@ NOTE: the above should have each item listed in quotes.
 	    (nconc debugger-args (car pair))
 	    (setq args (cadr pair)))
 	   ;; Anything else must be the script to debug.
-	   (t (setq script-name arg)
-	      (setq script-args args))
+	   (t (setq script-name (realgud:expand-file-name-if-exists arg))
+	      (setq script-args (cons script-name (cdr args))))
 	   )))
       (list interpreter-args debugger-args script-args annotate-p))))
 
-(defvar trepan2-command-name) ; # To silence Warning: reference to free variable
+;; To silence Warning: reference to free variable
+(defvar realgud:trepan2-command-name)
+
 (defun trepan2-suggest-invocation (debugger-name)
   "Suggest a trepan2 command invocation via `realgud-suggest-invocaton'"
-  (realgud-suggest-invocation trepan2-command-name trepan2-minibuffer-history
-			   "python" "\\.py"))
+  (realgud-suggest-invocation realgud:trepan2-command-name
+			      realgud:trepan2-minibuffer-history
+			      "python" "\\.py"
+			      realgud:trepan2-command-name))
 
 (defun trepan2-reset ()
   "Trepan2 cleanup - remove debugger's internal buffers (frame,
@@ -157,9 +219,9 @@ breakpoints, etc.)."
 ;; 	  trepan2-debugger-support-minor-mode-map-when-deactive))
 
 
-(defun trepan2-customize ()
+(defun realgud:trepan2-customize ()
   "Use `customize' to edit the settings of the `trepan2' debugger."
   (interactive)
-  (customize-group 'trepan2))
+  (customize-group 'realgud:trepan2))
 
-(provide-me "realgud-trepan2-")
+(provide-me "realgud:trepan2-")

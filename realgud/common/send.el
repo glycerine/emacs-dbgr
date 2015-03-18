@@ -1,8 +1,28 @@
-;;; Copyright (C) 2010 Rocky Bernstein <rocky@gnu.org>
+;; Copyright (C) 2015 Free Software Foundation, Inc
+
+;; Author: Rocky Bernstein <rocky@gnu.org>
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 (require 'comint)
 (require 'load-relative)
 (require-relative-list '("window") "realgud-")
 (require-relative-list '("buffer/helper") "realgud-buffer-")
+
+(declare-function realgud-get-cmdbuf        'realgud-buffer-helper)
+(declare-function comint-goto-process-mark  'comint)
+(declare-function comint-send-input         'comint)
 
 (defun realgud-send-command-comint (process command-str)
   "Assume we are in a comint buffer. Insert COMMAND-STR and
@@ -26,6 +46,7 @@ send that input onto the process."
 
 (defvar realgud-last-output-start)
 (defun fake-output-filter(process string)
+  "A process output filter that saves the results into a temporary buffer."
   (with-current-buffer (get-buffer-create "*realgud-process-output-temp*")
     (goto-char (point-max))
     (set (make-local-variable 'realgud-last-output-start)
@@ -34,7 +55,7 @@ send that input onto the process."
     (goto-char (point-max))))
 
 (defun realgud-send-command-process (process command-str)
-  "Sent Invoke the debugger COMMAND adding that command and the
+  "Invoke debugger COMMAND adding that command and the
 results into the command buffer."
   (fset 'comint-output-filter (symbol-function 'fake-output-filter))
   (apply comint-input-sender (list process command-str))
@@ -90,6 +111,8 @@ Some %-escapes in the string arguments are expanded. These are:
   %l -- Number of current source line.
   %p -- Numeric prefix argument converted to a string
         If no prefix argument %p is the null string.
+  %c -- Fully qualified class name derived from the expression
+        surrounding point.
   %s -- value of opt-str.
 
 "

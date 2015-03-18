@@ -1,5 +1,13 @@
-;;; Copyright (C) 2010, 2012 Rocky Bernstein <rocky@gnu.org>
+;;; Copyright (C) 2010, 2012, 2014-2015 Rocky Bernstein <rocky@gnu.org>
 ;; Fringe marks for history of stopping points
+(require 'load-relative)
+(require-relative-list '("helper") "realgud-")
+
+(declare-function realgud-loc-hist-item-at       'realgud-lochist)
+(declare-function buffer-killed?                 'helper)
+(declare-function realgud-loc-cmd-marker         'realgud-loc)
+(declare-function realgud:loc-follow             'realgud-loc)
+(declare-function realgud-loc-marker             'realgud-loc)
 
 ;; Bitmap for hollow overlay-arrow in fringe
 (if (display-images-p)
@@ -104,21 +112,20 @@ for example to indicate a debugger position."
 	 (cmd-mark2 (and loc2 (realgud-loc-cmd-marker loc2)))
 	 (cmd-mark3 (and loc1 (realgud-loc-cmd-marker loc1)))
 	 )
-    (if (and loc3 (not (equal mark3 mark2)))
-	(progn
-	  (realgud-fringe-set-arrow 'realgud-overlay-arrow3 mark3)
-	  (if do-cmdbuf?
-	      (realgud-fringe-set-arrow 'realgud-overlay-arrow3 cmd-mark3))))
-    (if (and loc2 (not (equal mark2 mark1)))
-	(progn
-	  (realgud-fringe-set-arrow 'realgud-overlay-arrow2 mark2)
-	  (if do-cmdbuf?
-	      (realgud-fringe-set-arrow 'realgud-overlay-arrow2 cmd-mark2))))
-    (if loc1
-	(progn
-	  (realgud-fringe-set-arrow 'realgud-overlay-arrow1 mark1)
-	  (if do-cmdbuf?
-	      (realgud-fringe-set-arrow 'realgud-overlay-arrow1 cmd-mark1))))
+    (when (and loc3 (not (equal mark3 mark2)))
+      (realgud-fringe-set-arrow 'realgud-overlay-arrow3 mark3)
+      (if do-cmdbuf?
+	  (realgud-fringe-set-arrow 'realgud-overlay-arrow3 cmd-mark3)))
+    (when (and loc2 (not (equal mark2 mark1)))
+      (realgud-fringe-set-arrow 'realgud-overlay-arrow2 mark2)
+      (if do-cmdbuf?
+	  (realgud-fringe-set-arrow 'realgud-overlay-arrow2 cmd-mark2)))
+    (when loc1
+      (realgud-fringe-set-arrow 'realgud-overlay-arrow1 mark1)
+      (when (and do-cmdbuf? cmd-mark1)
+	  (realgud-fringe-set-arrow 'realgud-overlay-arrow1 cmd-mark1)
+	  (goto-char (marker-position cmd-mark1)))
+      )
     ))
 
 (defun realgud-fringe-erase-history-arrows ()
@@ -136,30 +143,22 @@ session which should also erase those fringe arrows."
   "Goto the position stored in realgud-overlay-arrow1"
   (interactive "")
   (if realgud-overlay-arrow1
-      (progn
-	(switch-to-buffer (marker-buffer realgud-overlay-arrow1))
-	(goto-char realgud-overlay-arrow1)
-	))
+      (realgud:loc-follow realgud-overlay-arrow1))
   )
 
 (defun realgud-goto-arrow2()
   "Goto the position stored in realgud-overlay-arrow2"
   (interactive "")
   (if realgud-overlay-arrow2
-      (progn
-	(switch-to-buffer (marker-buffer realgud-overlay-arrow2))
-	(goto-char realgud-overlay-arrow2)
-	))
+      (realgud:loc-follow realgud-overlay-arrow2))
   )
+
 
 (defun realgud-goto-arrow3()
   "Goto the position stored in realgud-overlay-arrow3"
   (interactive "")
   (if realgud-overlay-arrow3
-      (progn
-	(switch-to-buffer (marker-buffer realgud-overlay-arrow3))
-	(goto-char realgud-overlay-arrow3)
-	))
+      (realgud:loc-follow realgud-overlay-arrow3))
   )
 
 (defun realgud-recenter-arrow1()
@@ -181,15 +180,15 @@ session which should also erase those fringe arrows."
     (with-current-buffer-safe buffer
       (if (and realgud-overlay-arrow3
 	       (eq (marker-buffer realgud-overlay-arrow3) buffer))
-	  (goto-char realgud-overlay-arrow3)
+	  (realgud:loc-follow realgud-overlay-arrow3)
 	)
       (if (and realgud-overlay-arrow2
 	       (eq (marker-buffer realgud-overlay-arrow2) buffer))
-	  (goto-char realgud-overlay-arrow2)
+	  (realgud:loc-follow realgud-overlay-arrow2)
       )
       (if (and realgud-overlay-arrow1
 	       (eq (marker-buffer realgud-overlay-arrow1) buffer))
-	  (goto-char realgud-overlay-arrow1)
+	  (realgud:loc-follow realgud-overlay-arrow1)
 	)
       (redisplay)
       )

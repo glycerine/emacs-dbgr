@@ -1,17 +1,43 @@
 ;;; Backtrace buffer
-;;; Copyright (C) 2010-2013 Rocky Bernstein <rocky@gnu.org>
+
+;; Author: Rocky Bernstein <rocky@gnu.org>
+;; Version: 1.1
+;; Keywords: internal
+;; URL: http://github.com/rocky/emacs-load-relative
+;; Compatibility: GNU Emacs 24.x
+
+;; Copyright (C) 2015 Free Software Foundation, Inc
+
+;; This program is free software: you can redistribute it and/or
+;; modify it under the terms of the GNU General Public License as
+;; published by the Free Software Foundation, either version 3 of the
+;; License, or (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful, but
+;; WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;; General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see
+;; <http://www.gnu.org/licenses/>.
+
 (require 'load-relative)
 (eval-when-compile (require 'cl-lib))
 (require-relative-list
- '("../key" "helper") "realgud-")
+ '("../key" "helper" "follow" "loc") "realgud-")
 
 (require-relative-list
  '("command") "realgud-buffer-")
 
+(declare-function realgud-cmdbuf-debugger-name 'realgud-buffer-command)
+(declare-function realgud-cmdbuf?              'realgud-buffer-command)
 (declare-function realgud-backtrace-mode (cmdbuf))
-(declare-function realgud-cmd-backtrace (arg))
+(declare-function realgud:cmd-backtrace (arg))
 (declare-function realgud-cmdbuf-pat(key))
 (declare-function realgud-cmdbuf-info-in-srcbuf?= (arg))
+(declare-function realgud-get-cmdbuf 'realgud-buffer-helper)
+(declare-function realgud:file-loc-from-line 'realgud-file)
 
 (defstruct realgud-backtrace-info
   "debugger object/structure specific to a (top-level) program to be debugged."
@@ -22,10 +48,9 @@
                    ;; frame
 )
 
-(declare-function realgud-cmd-frame(num))
+(declare-function realgud:cmd-frame 'realgud-buffer-command)
 (declare-function realgud-get-cmdbuf(&optional opt-buffer))
-(declare-function realgud-command (fmt &optional arg no-record?
-				    frame-switch? realgud-prompts?))
+(declare-function realgud-command 'realgud-send)
 
 (make-variable-buffer-local (defvar realgud-backtrace-info))
 
@@ -49,8 +74,31 @@
     )
 )
 
+(defun realgud:backtrace-describe (&optional buffer)
+  (interactive "")
+  (unless buffer (setq buffer (current-buffer)))
+  (with-current-buffer buffer
+    (let ((frames (realgud-backtrace-info-frame-ring realgud-backtrace-info))
+	  (frame)
+	  (loc)
+	  (i 0))
+      (switch-to-buffer (get-buffer-create "*Describe*"))
+      (while (and (< i (ring-length frames)) (setq frame (ring-ref frames i)))
+	(insert (format "*** %d\n" i))
+	(insert (format "%s\n" frame))
+	(when (markerp frame)
+	  (with-current-buffer (marker-buffer frame)
+	    (goto-char frame)
+	    (setq loc (get-text-property (point) 'loc))
+	  )
+	  (when loc (realgud:loc-describe loc)))
+	(setq i (1+ i))
+      )
+    )
+    ))
+
 ;; FIXME: create this in a new frame.
-(defun realgud-backtrace-init ()
+(defun realgud:backtrace-init ()
   (interactive)
   (let ((buffer (current-buffer))
   	(cmdbuf (realgud-get-cmdbuf))
@@ -71,7 +119,7 @@
 	(realgud-cmdbuf-info-in-srcbuf?= (not (realgud-cmdbuf? buffer)))
 	(realgud-cmdbuf-info-divert-output?= 't)
 	(setq realgud-track-divert-string nil)
-	(realgud-cmd-backtrace 0)
+	(realgud:cmd-backtrace 0)
 	(while (and (eq 'run (process-status process))
 		    (null realgud-track-divert-string)
 		    (> 1000 (setq sleep-count (1+ sleep-count))))
@@ -82,7 +130,7 @@
 	  ;; else
 	  ;; (message "+++4 %s" realgud-track-divert-string)
 	  (let ((bt-buffer (get-buffer-create
-			    (format "*%s backtrace*"
+			    (format "*Backtrace %s*"
 				    (realgud-get-buffer-base-name
 				     (buffer-name)))))
 		(divert-string realgud-track-divert-string)
@@ -93,10 +141,10 @@
 	      (delete-region (point-min) (point-max))
 	      (if divert-string
 		  (let* ((triple
-			  (realgud-backtrace-add-text-properties frame-pat
-							      divert-string
-							      indicator-re))
-			 (string-with-props (car triple))
+			  (realgud:backtrace-add-text-properties
+			   frame-pat cmdbuf indicator-re))
+			 (string-with-props
+			  (ansi-color-filter-apply (car triple)))
 			 (frame-num-pos-list (caddr triple))
 			 )
 		    (setq selected-frame-num (cadr triple))
@@ -222,7 +270,7 @@ not updating the frame stack."
           (while (not (string= acc ""))
             (if (not (realgud-goto-entry-try acc))
                 (setq acc (substring acc 1))
-              (realgud-cmd-frame (string-to-number acc))
+              (realgud:cmd-frame (string-to-number acc))
               ;; Break loop.
               (setq acc "")))))
     (message "`realgud-goto-frame-n' must be bound to a number key")))
@@ -280,12 +328,49 @@ non-digit will start entry number from the beginning again."
   (if (realgud-backtrace?)
       (let ((frame-num (get-text-property (point) 'frame-num)))
 	(if frame-num
-	    (realgud-cmd-frame frame-num)
+	    (realgud:cmd-frame frame-num)
 	  (message "No frame property found at this point")
 	  )
 	)
     )
   )
+
+(defun realgud-goto-frame-1 ()
+  "Go to the frame 1"
+  (interactive)
+  (if (realgud-backtrace?)
+      (realgud:cmd-frame 1)
+    )
+  )
+
+(defun realgud-goto-frame-2 ()
+  "Go to the frame 2"
+  (interactive)
+  (if (realgud-backtrace?)
+      (realgud:cmd-frame 2)
+    )
+  )
+
+(defun realgud-goto-frame-3 ()
+  "Go to the frame 3"
+  (interactive)
+  (if (realgud-backtrace?)
+      (realgud:cmd-frame 3)
+    )
+  )
+
+(defun realgud-goto-frame-mouse (event)
+  (interactive "e")
+  (let* ((pos (posn-point (event-end event)))
+	 (frame-num (get-text-property pos 'frame-num)))
+    (if (realgud-backtrace?)
+	(if frame-num
+	    (realgud:cmd-frame frame-num)
+	  (message "No frame property found at this point")
+	  )
+      )
+    )
+)
 
 (defun realgud-goto-frame-n ()
   "Go to the frame number indicated by the accumulated numeric keys just entered.
@@ -300,64 +385,87 @@ non-digit will start entry number from the beginning again."
       (setq realgud-goto-entry-acc ""))
   (realgud-goto-frame-n-internal (this-command-keys)))
 
-(defun realgud-backtrace-add-text-properties  (frame-pat &optional opt-string
-						      frame-indicator-re)
-  "Parse STRING and add properties for that"
+(defun realgud:backtrace-add-text-properties(frame-pat cmdbuf &optional opt-string
+						       frame-indicator-re)
+  "Parse OPT-STRING or the current buffer and add frame properties: frame number,
+filename, line number, whether the frame is selected as text properties."
 
-  (let ((string (or opt-string
+  (let* ((string (or opt-string
 		    (buffer-substring (point-min) (point-max))
 		    ))
-	(frame-regexp (realgud-loc-pat-regexp frame-pat))
-	(frame-group-pat (realgud-loc-pat-num frame-pat))
-	(alt-frame-num -1)
-	(last-pos 0)
-	(selected-frame-num nil)
-	(frame-num-pos-list '())
-	)
-    (while (string-match frame-regexp string last-pos)
-      (let ((frame-num-str)
-	    (frame-num)
-
-	    ;; FIXME: Remove hack that 1 is always the frame indicator.
+	 (stripped-string (ansi-color-filter-apply string))
+	 (frame-regexp (realgud-loc-pat-regexp frame-pat))
+	 (frame-group-pat (realgud-loc-pat-num frame-pat))
+	 (file-group-pat (realgud-loc-pat-file-group frame-pat))
+	 (line-group-pat (realgud-loc-pat-line-group frame-pat))
+	 (alt-frame-num -1)
+	 (last-pos 0)
+	 (selected-frame-num nil)
+	 (frame-num-pos-list '())
+	 )
+    (while (string-match frame-regexp stripped-string last-pos)
+      (let ((frame-num-str) (frame-num) (line-num) (filename)
+	    ;; FIXME: Remove hack that group 1 is always the frame indicator.
 	    (frame-indicator
-	     (substring string (match-beginning 1) (match-end 1)))
+	     (substring stripped-string (match-beginning 1) (match-end 1)))
 	    (frame-num-pos)
 
 	    )
 	(if frame-group-pat
 	    (progn
 	      (setq frame-num-str
-		    (substring string (match-beginning frame-group-pat)
+		    (substring stripped-string
+			       (match-beginning frame-group-pat)
 			       (match-end frame-group-pat)))
 	      (setq frame-num (string-to-number frame-num-str))
 	      (setq frame-num-pos (match-beginning frame-group-pat))
 	      (add-to-list 'frame-num-pos-list frame-num-pos 't)
 	      (add-text-properties (match-beginning frame-group-pat)
 				   (match-end frame-group-pat)
-				   '(mouse-face highlight
-						help-echo
-						"mouse-2: goto this frame")
+				   (list 'mouse-face 'highlight
+					 'help-echo "mouse-2: goto this frame"
+					 'frame frame-num)
 				   string)
-
 	      )
 	  ; else
 	  (progn
 	    (setq frame-num-str
-		    (substring string (match-beginning 0)
+		    (substring stripped-string (match-beginning 0)
 			       (match-end 0)))
 	    (setq frame-num (incf alt-frame-num))
 	    (setq frame-num-pos (match-beginning 0))
 	    (add-to-list 'frame-num-pos-list frame-num-pos 't)
-	    (add-text-properties (match-beginning 0)
-				 (match-end 0)
-				 '(mouse-face highlight
-					      help-echo
-					      "mouse-2: goto this frame")
-				   string)
+	    (add-text-properties (match-beginning 0) (match-end 0)
+				 (list 'mouse-face 'highlight
+				       'help-echo "mouse-2: goto this frame"
+				       'frame frame-num)
+				 string)
 	    )
 	  )
+	(when file-group-pat
+	  (setq filename (substring stripped-string
+				    (match-beginning file-group-pat)
+				    (match-end file-group-pat)))
+	  (add-text-properties (match-beginning file-group-pat)
+			       (match-end file-group-pat)
+			       (list 'mouse-face 'highlight
+				     'help-echo "mouse-2: goto this file"
+				     'action 'realgud:follow-event
+				     'file filename)
+			       string)
+	    )
+	(when line-group-pat
+	  (let ((line-num-str (substring stripped-string
+				    (match-beginning line-group-pat)
+				    (match-end line-group-pat))))
+	    (setq line-num (string-to-number (or line-num-str "1")))
+	  ))
 
-
+	(when (and (stringp filename) (numberp line-num))
+	  (let ((loc (realgud:file-loc-from-line filename line-num cmdbuf)))
+	    (put-text-property (match-beginning 0) (match-end 0)
+			       'loc loc string)
+	    ))
 	(put-text-property (match-beginning 0) (match-end 0)
 			   'frame-num  frame-num string)
 	(setq last-pos (match-end 0))

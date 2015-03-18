@@ -1,6 +1,8 @@
 (require 'test-simple)
+(require 'load-relative)
 (load-file "../realgud/debugger/pydb/pydb.el")
-(declare-function pydb-parse-cmd-args 'realgud-pydb)
+(declare-function pydb-parse-cmd-args 'realgud:pydb)
+(declare-function __FILE__            'load-relative)
 
 (test-simple-start)
 

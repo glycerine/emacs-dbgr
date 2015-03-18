@@ -1,4 +1,4 @@
-;;; Copyright (C) 2010, 2011 Rocky Bernstein <rocky@gnu.org>
+;; Copyright (C) 2010-2011, 2015 Rocky Bernstein <rocky@gnu.org>
 ;; -------------------------------------------------------------------
 ;; Menu support.
 ;;
@@ -23,7 +23,7 @@
   "Return a menu item entry with the correct key bindings.
 
 A command can be bound to a number of different key sequences. If
-the dbgr common map contains a binding it is displayed in the
+the realgud common map contains a binding it is displayed in the
 menu. (The common map typically contains function key bindings.)"
   (let ((key-binding (where-is-internal cmd (list common-map) t))
         (hint '()))
@@ -34,165 +34,137 @@ menu. (The common map typically contains function key bindings.)"
             args)))
 
 
-;; Note, we re-populate the menus of the different minor and major
-;; modes. The reason is that Emacs caches the key bindings, which
-;; means that wrong ones are shown when buffers are changed.
+;; I had a *lot* of trouble with emacs keymaps and duplicate menus.
+;; Don't use set-parent-mode on any minor mode.
+;; It is possible that realgud-track-mode could be a derived major mode whose parent
+;; is comint, but that seems drastic.
+;; Instead we take the various minor modes and add a debugger menu to that.
+(defun realgud-populate-debugger-menu (map)
+  "Populate the 'Debugger' menu inside an existing menu (short-key or track-mode)."
+  (let ((debugger-map (make-sparse-keymap "Debugger")))
+    (define-key map [menu-bar debugger] (cons "Debugger" debugger-map))
+    (define-key debugger-map [command]
+      (realgud-menu-item debugger-map "Go to Command Buffer"
+			 'realgud-window-cmd-undisturb-src
+			 :enable '(and (realgud-get-process) (not (realgud-cmdbuf?)))
+			 :help (documentation 'realgud-window-cmd-undisturb-src)
+			 ))
 
-;; Remember, all menu items are added in the reverse order!
+    (define-key debugger-map [source]
+      (realgud-menu-item debugger-map "Go to Source Buffer"
+			 'realgud-window-src-undisturb-cmd
+			 :enable '(and (realgud-get-process) (not (realgud-srcbuf?)))
+			 :help (documentation 'realgud-window-src-undisturb-cmd)
+			 ))
 
-(defun realgud-populate-debugger-menu (parent-map)
-  "Populate the 'Debugger' menu by creating a keymap whose parent is PARENT-MAP."
-  (let ((menu-map (make-sparse-keymap))
-	)
+    (define-key debugger-map [info]
+      (realgud-menu-item debugger-map "Debugger Info"
+			 'realgud:cmdbuf-info-describe
+			 :help (documentation 'realgud:cmdbuf-info-describe)
+			 ))
 
-    (define-key menu-map [menu-bar debugger] (cons "Debugger" menu-map))
-    (set-keymap-parent parent-map menu-map)
+    (define-key debugger-map [backtrace]
+      (realgud-menu-item debugger-map "Backtrace" 'realgud:window-bt
+			 :enable '(realgud-get-process)
+			 :help (documentation 'realgud:window-bt)
+			 ))
 
-    ;; FIXME: Dry define-key menu-map ... with a macro.
+    (define-key debugger-map [arrow3]
+      (realgud-menu-item debugger-map "Arrow 3" 'realgud-goto-arrow3
+			 :enable '(realgud-get-process)
+			 :help (documentation 'realgud-goto-arrow3)
+			 ))
 
-    ;; (define-key menu [break-delete]
-    ;;   (realgud-menu-item menu-map "Enable/disable breakpoint"
-    ;;                     'realgud-toggle-source-breakpoint-enabled
-    ;;                     :enable '(realgud-get-process)))
+    (define-key debugger-map [arrow2]
+      (realgud-menu-item debugger-map "Arrow 2" 'realgud-goto-arrow2
+			 :enable '(realgud-get-process)
+			 :help (documentation 'realgud-goto-arrow2)
+			 ))
 
-    ;; (define-key menu [break]
-    ;;   (realgud-menu-item menu-map "Toggle breakpoint"
-    ;;                     'realgud-toggle-source-breakpoint
-    ;;                     :enable '(realgud-get-process)))
+    (define-key debugger-map [arrow1]
+      (realgud-menu-item debugger-map "Arrow 1" 'realgud-goto-arrow1
+			 :enable '(realgud-get-process)
+			 :help (documentation 'realgud-goto-arrow1)
+			 ))
 
-    (define-key menu-map [command]
-      (realgud-menu-item menu-map "command" 'realgud-window-cmd-undisturb-src
-		      :enable '(realgud-get-process)
-		      :help (documentation 'realgud-window-cmd-undisturb-src)
-		      ))
+    (define-key debugger-map [break]
+	(realgud-menu-item debugger-map "Set Breakpoint" 'realgud:cmd-break
+			   :enable '(realgud-get-process)
+			   :help (documentation 'realgud:cmd-break)
+			   ))
 
-    (define-key menu-map [source]
-      (realgud-menu-item menu-map "source" 'realgud-window-src-undisturb-cmd
-		      :enable '(realgud-get-process)
-		      :help (documentation 'realgud-window-src-undisturb-cmd)
-		      ))
+    (define-key debugger-map [continue]
+      (realgud-menu-item debugger-map "Continue" 'realgud:cmd-continue
+			 :enable '(realgud-get-process)
+			 :help (documentation 'realgud:cmd-continue)
+			 ))
 
-    (define-key menu-map [backtrace]
-      (realgud-menu-item menu-map "backtrace" 'realgud-window-bt
-		      :enable '(realgud-get-process)
-		      :help (documentation 'realgud-window-bt)
-		      ))
+    (define-key debugger-map [until]
+      (realgud-menu-item debugger-map "Continue to Line" 'realgud:cmd-until
+			 :enable '(and (realgud-get-process) realgud-short-key-mode)
+			 :help (documentation 'realgud:cmd-until)
+			 ))
 
-    (define-key menu-map [arrow3]
-      (realgud-menu-item menu-map "arrow 3" 'realgud-goto-arrow3
-		      :enable '(realgud-get-process)
-		      :help (documentation 'realgud-goto-arrow3)
-		      ))
+    (define-key debugger-map [next]
+      (realgud-menu-item debugger-map "Next (step through)" 'realgud:cmd-next
+			 :enable '(realgud-get-process)
+			   :help (documentation 'realgud:cmd-next)
+			   ))
 
-    (define-key menu-map [arrow2]
-      (realgud-menu-item menu-map "arrow 2" 'realgud-goto-arrow2
-		      :enable '(realgud-get-process)
-		      :help (documentation 'realgud-goto-arrow2)
-		      ))
+    (define-key debugger-map [finish]
+      (realgud-menu-item debugger-map "Finish (step out)" 'realgud:cmd-finish
+			 :enable '(realgud-get-process)
+			   :help (documentation 'realgud:cmd-finish)
+			   ))
 
-    (define-key menu-map [arrow1]
-      (realgud-menu-item menu-map "arrow 1" 'realgud-goto-arrow1
-		      :enable '(realgud-get-process)
-		      :help (documentation 'realgud-goto-arrow1)
-		      ))
+    (define-key debugger-map [step]
+      (realgud-menu-item debugger-map "Step (step into)" 'realgud:cmd-step
+			 :enable '(realgud-get-process)
+			 :help (documentation 'realgud:cmd-step)
+			 ))
 
-    (define-key menu-map [break]
-      (realgud-menu-item menu-map "Set breakpoint" 'realgud-cmd-break
-                        :enable '(realgud-get-process)
-			:help (documentation 'realgud-cmd-break)
-			))
+    (define-key debugger-map [menu-bar debugger line1] '(menu-item "--"))
 
-    (define-key menu-map [continue]
-      (realgud-menu-item menu-map "continue" 'realgud-cmd-continue
-                        :enable '(realgud-get-process)
-			:help (documentation 'realgud-cmd-continue)
-			))
+    (define-key debugger-map [down]
+      (realgud-menu-item debugger-map "Down Stack" 'realgud:cmd-newer-frame
+			 :enable '(realgud-get-process)
+			 :help (documentation 'realgud:cmd-newer-frame)
+			 ))
 
-    (define-key menu-map [next]
-      (realgud-menu-item menu-map "next (step through)" 'realgud-cmd-next
-                        :enable '(realgud-get-process)
-			:help (documentation 'realgud-cmd-next)
-			))
+    (define-key debugger-map [up]
+      (realgud-menu-item debugger-map "Up Stack" 'realgud:cmd-older-frame
+			 :enable '(realgud-get-process)
+			 :help (documentation 'realgud:cmd-older-frame)
+			 ))
 
-    (define-key menu-map [finish]
-      (realgud-menu-item menu-map "finish (step out)" 'realgud-cmd-finish
-                        :enable '(realgud-get-process)
-			:help (documentation 'realgud-cmd-finish)
-			))
+    (define-key debugger-map [menu-bar debugger line1] '(menu-item "--"))
 
-    (define-key menu-map [step]
-      (realgud-menu-item menu-map "step (step into)" 'realgud-cmd-step
-                        :enable '(realgud-get-process)
-			:help (documentation 'realgud-cmd-step)
-			))
+    (define-key debugger-map [quit]
+      (realgud-menu-item debugger-map "Quit" 'realgud:cmd-quit
+			 :enable '(realgud-get-process)
+			 :help (documentation 'realgud:cmd-quit)
+			 ))
 
-    (define-key menu-map [menu-bar debugger line1] '(menu-item "--"))
+    (define-key debugger-map [restart]
+      (realgud-menu-item debugger-map "Restart" 'realgud:cmd-restart
+			 :enable '(realgud-get-process)
+			 :help (documentation 'realgud:cmd-restart)
+			 ))
 
-    (define-key menu-map [up]
-      (realgud-menu-item menu-map "up" 'realgud-cmd-newer-frame
-		      :enable '(realgud-get-process)
-		      :help (documentation 'realgud-cmd-newer-frame)
-		      ))
+    (define-key debugger-map [eval]
+      (realgud-menu-item debugger-map "Evaluate Region" 'realgud:cmd-eval-region
+			 :enable '(realgud-get-process)
+			 :help (documentation 'realgud:cmd-eval-region)
+			 ))
 
-    (define-key menu-map [down]
-      (realgud-menu-item menu-map "down" 'realgud-cmd-older-frame
-		      :enable '(realgud-get-process)
-		      :help (documentation 'realgud-cmd-older-frame)
-		      ))
-
-    (define-key menu-map [menu-bar debugger line1] '(menu-item "--"))
-
-    (define-key menu-map [quit]
-      (realgud-menu-item menu-map "quit" 'realgud-cmd-quit
-		      :enable '(realgud-get-process)
-		      :help (documentation 'realgud-cmd-quit)
-		      ))
-
-    (define-key menu-map [restart]
-      (realgud-menu-item menu-map "restart" 'realgud-cmd-restart
-		      :enable '(realgud-get-process)
-		      :help (documentation 'realgud-cmd-restart)
-		      ))
-
-    (define-key menu-map [eval]
-      (realgud-menu-item menu-map "eval" 'realgud-cmd-eval-region
-                        :enable '(realgud-get-process)
-			:help (documentation 'realgud-cmd-eval-region)
-			))
-
-    (define-key menu-map [recenter]
-      (realgud-menu-item menu-map "recenter" 'realgud-recenter-arrow
-		      :enable '(realgud-get-process)
-		      :help (documentation 'realgud-recenter-arrow)
-		      ))
-
-    (define-key menu-map [menu-bar debugger line2] '(menu-item "--"))
-
-    ;; ;; --------------------
-    ;; ;; The "Options" submenu.
-
-    ;; (let ((submenu (make-sparse-keymap)))
-    ;;   (define-key menu [options] (cons "Options" submenu)))
-
-    ;; (define-key map [menu-bar debugger options customize]
-    ;;   (realgud-menu-item menu-map
-    ;;                     "Customize Dbgr" 'realgud-customize))
-
-    ;; (define-key map [menu-bar debugger options line1] '(menu-item "--"))
-
-
-
-    ;; ----------------
-    ;; The "short key" toggle.
-
-    (define-key menu-map [menu-bar debugger options short-key-mode]
-      (realgud-menu-item menu-map
-                        "Short keys in source" 'realgud-short-key-mode
-                        :button
-			:help "Toggle single characters as debugger commands"
-                        '(:toggle
-                          . realgud-short-key-mode)))
-
-    menu-map))
+    (define-key debugger-map [Recenter]
+      (realgud-menu-item debugger-map "Recenter" 'realgud-recenter-arrow
+			 :enable '(realgud-get-process)
+			 :help (documentation 'realgud-recenter-arrow)
+			 ))
+    ;; Put them in the menu bar:
+    (setq menu-bar-final-items (append '(debugger) menu-bar-final-items))
+    map
+  ))
 
 (provide-me "realgud-")

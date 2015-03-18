@@ -10,6 +10,8 @@
 
 (declare-function realgud-loc-pat-regexp 'realgud-backtrace-mode)
 (declare-function realgud-cmdbuf-info-loc-regexp 'realgud-buffer-command)
+(declare-function test-simple-start 'test-simple)
+
 
 (defun setup-regexp-vars(pat-hash)
   (setq helper-bps    (gethash "brkpt-set" pat-hash))
@@ -33,14 +35,16 @@
 (defun cmdbuf-loc-match(text dbgr)
   "Match TEXT against cmdbuf-info-loc field VAR"
   (string-match (realgud-cmdbuf-info-loc-regexp dbgr) text)
-)
+  )
 
 (defun prompt-match(prompt-str &optional num-str fmt-str)
   (unless fmt-str (setq fmt-str "debugger prompt %s"))
   (assert-equal 0 (string-match (realgud-loc-pat-regexp prompt-pat)
 				prompt-str)
 		(format fmt-str prompt-str))
-  (if num-str
-      (assert-equal num-str (substring prompt-str
+  (cond (num-str
+	 (assert-equal num-str (substring prompt-str
 				       (match-beginning 1) (match-end 1))))
-)
+	('t 't))
+  )
+(provide 'realgud-regexp-helper)

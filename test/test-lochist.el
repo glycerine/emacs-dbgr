@@ -1,6 +1,18 @@
 (require 'test-simple)
 (load-file "../realgud/common/loc.el")
 (load-file "../realgud/common/lochist.el")
+(load-file "../realgud/common/buffer/helper.el")
+
+(declare-function __FILE__                    'load-relative)
+(declare-function make-realgud-loc            'realgud-loc)
+(declare-function make-realgud-loc-his        'realgud-loc)
+(declare-function realgud-loc-hist-add        'realgud-lochist)
+(declare-function realgud-loc-hist-ring       'realgud-lochist)
+(declare-function realgud-loc-hist-item       'realgud-lochist)
+(declare-function realgud-loc-hist-position   'realgud-lochist)
+(declare-function realgud-loc-hist-index      'realgud-lochist)
+(declare-function realgud-loc-hist-newest     'realgud-lochist)
+(declare-function realgud-get-cmdbuf-from-srcbuf 'realgud-buffer-helper)
 
 (test-simple-start)
 
@@ -13,6 +25,35 @@
 ;;;        ;; 		(realgud-loc-hist-index loc-hist))))
 
 ;;; (setup)
+
+
+;; FIXME: redo tests, so we don't have to almost duplicate and
+;; dummy realgud-loc-current.
+(defun realgud-loc-current(&optional source-buffer cmd-marker)
+  "Create a location object for the point in the current buffer.
+   If SOURCE-BUFFER is not given, take the current buffer as the
+   source buffer."
+  (interactive "")
+  (unless source-buffer
+    (setq source-buffer (current-buffer)))
+  ;;(unless (realgud-srcbuf? source-buffer)
+  ;;  (error "%s is not a realgud source buffer" source-buffer))
+  (unless cmd-marker
+    (setq cmd-marker
+	  (realgud-get-cmdbuf-from-srcbuf source-buffer))
+    )
+  (with-current-buffer source-buffer
+    (let ((mark (point-marker))
+	  (text (realgud:buffer-line-no-props)))
+      (make-realgud-loc
+       :filename (buffer-file-name source-buffer)
+       :column-number (current-column)
+       :line-number (line-number-at-pos)
+       :source-text text
+       :marker      mark
+       :cmd-marker cmd-marker
+       )
+      )))
 
 
 (let ((saved-buffer (current-buffer)))

@@ -1,5 +1,5 @@
 dnl FIXME: pick up from realgud.el
-AC_INIT(emacs-realgud, 0.1.0,)
+AC_INIT(emacs-realgud, 1.1,)
 AC_CONFIG_SRCDIR(realgud.el)
 AM_INIT_AUTOMAKE([foreign])
 AM_MAINTAINER_MODE
@@ -8,17 +8,26 @@ AC_PATH_PROG([EMACS], [emacs], [emacs])
 AC_ARG_WITH(emacs, AC_HELP_STRING([--with-emacs],
                   [location of emacs program]), EMACS=$withval)
 
-AC_MSG_NOTICE("Checking emacs version and prerequiste packages")
+AC_MSG_NOTICE("Checking emacs version")
 $EMACS -batch -q --no-site-file -eval \
-  '(if (<= emacs-major-version 22)
+  '(if (<= emacs-major-version 23)
        (progn
-         (error "You need GNU Emacs 23 or better.")
+         (error "You need GNU Emacs 24 or better.")
          (kill-emacs 1)
        )
-     (dolist (package
-         (quote (cl-lib loc-changes load-relative test-simple)))
+   )'
+if test $? -ne 0 ; then
+    AC_MSG_ERROR([Can't continue until above error is corrected.])
+fi
+
+if test "$NO_CHECK_EMACS_PACKAGES" = "" ; then
+AC_MSG_NOTICE("Checking prerequiste packages")
+$EMACS -batch -q --no-site-file -eval \
+  '(dolist (package
+         (quote (cl-lib list-utils loc-changes load-relative test-simple)))
         (require package))
    )'
+fi
 if test $? -ne 0 ; then
     AC_MSG_ERROR([Can't continue until above error is corrected.])
 fi
@@ -58,7 +67,9 @@ AC_CONFIG_FILES([Makefile \
 		 realgud/debugger/bashdb/Makefile \
 		 realgud/debugger/gdb/Makefile \
 		 realgud/debugger/gub/Makefile \
+		 realgud/debugger/jdb/Makefile \
 		 realgud/debugger/kshdb/Makefile \
+		 realgud/debugger/nodejs/Makefile \
 		 realgud/debugger/perldb/Makefile \
 		 realgud/debugger/pdb/Makefile \
 		 realgud/debugger/pydb/Makefile \
